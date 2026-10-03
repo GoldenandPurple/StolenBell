@@ -62,29 +62,46 @@ Node.js is what runs the Toast connection on this computer.
 
 ## 5. Connect it to Claude (demo data first)
 
-1. In Claude Desktop, open **Settings → Developer** and click **Edit Config**. This opens the folder containing **`claude_desktop_config.json`**. Open that file in **Notepad**.
-2. Replace everything in the file with this:
+1. In Claude Desktop, open **Settings → Developer** and click **Edit Config**. This opens the folder containing **`claude_desktop_config.json`**.
+2. **Make a backup first:** copy the file and name the copy `claude_desktop_config.backup.json`. If Claude won't start after your edit, delete the edited file and rename the backup back.
+3. Open `claude_desktop_config.json` in **Notepad**. It probably already has settings in it (for example `allowedOrigins` or Cowork settings). **Leave all of those exactly as they are.** You're only adding a `toast` section.
+4. Add the `toast` section:
 
-   ```json
-   {
-     "mcpServers": {
-       "toast": {
-         "command": "node",
-         "args": ["C:/StolenBell/dist/index.js"],
-         "env": {
-           "TOAST_MCP_MODE": "demo"
+   - **If the file has no `"mcpServers"` line**, add this just before the file's very last `}`, and put a comma after the `}` or `]` that comes right before it:
+
+     ```json
+       "mcpServers": {
+         "toast": {
+           "command": "node",
+           "args": ["C:/StolenBell/dist/index.js"],
+           "env": {
+             "TOAST_MCP_MODE": "demo"
+           }
          }
        }
+     ```
+
+     The end of the file then looks like this:
+
+     ```json
+       "allowedOrigins": [ ...left exactly as it was... ],
+       "mcpServers": {
+         "toast": { ... }
+       }
      }
-   }
-   ```
+     ```
 
-   If the file already had other entries under `mcpServers`, keep them and add the `"toast": { … }` block alongside them, with a comma between entries.
+   - **If the file already has `"mcpServers": {`**, add only the `"toast": { ... }` part inside it, with a comma between it and any entry already there.
 
-   Use forward slashes (`C:/StolenBell/...`) exactly as shown. Backslashes need doubling in this file and are easy to get wrong.
-3. Save the file.
-4. **Fully quit Claude.** Closing the window isn't enough: right-click the Claude icon in the system tray (bottom-right, near the clock; you may need the **^** arrow), choose **Quit**, then open Claude again.
-5. Back in **Settings → Developer**, **toast** should be listed as running.
+   If the file is completely empty, wrap the section in `{` and `}`.
+
+   Tips:
+   - Every entry is separated from the next by a comma, and the last entry in a block has no comma after it. This is the most common mistake.
+   - Use plain straight quotes (`"`), not curly ones (“ ”). Curly quotes appear when you paste from Word or email.
+   - Use forward slashes (`C:/StolenBell/...`) exactly as shown. Backslashes need doubling in this file and are easy to get wrong.
+5. Save the file.
+6. **Fully quit Claude.** Closing the window isn't enough: right-click the Claude icon in the system tray (bottom-right, near the clock; you may need the **^** arrow), choose **Quit**, then open Claude again.
+7. Back in **Settings → Developer**, **toast** should be listed as running. If Claude shows a config error instead, a comma or quote is usually out of place; see Troubleshooting.
 
 **Check it:** start a new chat and type:
 
@@ -122,14 +139,9 @@ Someone with admin access to Toast does this once:
 ### Put them in the config
 
 1. Open `claude_desktop_config.json` again (**Settings → Developer → Edit Config**).
-2. Replace the `"env"` section so the whole file looks like this, with your values in place of the `PASTE-…` text:
+2. Find the `"env"` part of the `toast` section you added in step 5, and replace just that part with this, putting your values in place of the `PASTE-…` text. Leave everything else in the file as it is.
 
    ```json
-   {
-     "mcpServers": {
-       "toast": {
-         "command": "node",
-         "args": ["C:/StolenBell/dist/index.js"],
          "env": {
            "TOAST_MCP_MODE": "live",
            "TOAST_API_ACCESS_URL": "PASTE-THE-API-ACCESS-URL",
@@ -137,9 +149,6 @@ Someone with admin access to Toast does this once:
            "TOAST_CLIENT_SECRET": "PASTE-THE-CLIENT-SECRET",
            "TOAST_RESTAURANT_GUID": "PASTE-THE-LOCATION-GUID"
          }
-       }
-     }
-   }
    ```
 
    Keep the quotation marks around each value.
@@ -189,7 +198,7 @@ Nothing is paid and nothing is changed in Toast. The form is a draft for the GM 
 **Claude says it doesn't have the toast tools**
 - Check **Settings → Developer**: is **toast** listed, and does it show an error?
 - Make sure you fully quit Claude from the system tray, not just closed the window.
-- Open the config file and check the JSON. A missing comma or quotation mark breaks the whole file. You can paste it into **https://jsonlint.com** to find the problem. Don't paste it there once it contains the client secret.
+- Open the config file and check the JSON. A missing comma or quotation mark breaks the whole file, including Claude's own settings in it. If you can't spot the problem, put the backup from step 5 back and try the edit again. You can paste it into **https://jsonlint.com** to find the problem. Don't paste it there once it contains the client secret.
 - The log is at `%APPDATA%\Claude\logs\mcp-server-toast.log`. Paste that into File Explorer's address bar to open it.
 
 **The log says `node` isn't found, or `spawn node ENOENT`**
