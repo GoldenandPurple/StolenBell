@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { DayData, Reference } from '../src/data/repository.js';
 import { zonedTimeToUtc } from '../src/data/zoned.js';
 import { TipoutConfigSchema } from '../src/tipout/config.js';
-import { buildTipoutInputs } from '../src/tipout/inputs.js';
+import { buildTipoutInputs, shortName } from '../src/tipout/inputs.js';
 import type { ToastOrder, ToastTimeEntry } from '../src/toast/types.js';
 
 const TZ = 'America/Vancouver';
@@ -282,6 +282,34 @@ describe('jobs not listed in the config', () => {
     const result = buildTipoutInputs(day, ref, catchAll, CASH);
     expect(result.input.periods.Dinner!.staff.map((s) => s.name)).not.toContain('Sam');
     expect(result.issues.map((i) => i.message).join()).not.toMatch(/treated as/);
+  });
+});
+
+describe('names on the sheet', () => {
+  it('uses first name and last initial', () => {
+    expect(shortName('Mara Chen')).toBe('Mara C.');
+    expect(shortName('Ana María de la Cruz')).toBe('Ana C.');
+    expect(shortName('Priya')).toBe('Priya');
+    expect(shortName('Unknown employee (abc123)')).toBe('Unknown employee (abc123)');
+  });
+
+  it('falls back to full names when two people would share a short name', () => {
+    const named: Reference = {
+      ...ref,
+      employees: new Map([
+        ['e-1', { name: 'Sam Lee', jobGuids: [], deleted: false }],
+        ['e-2', { name: 'Sam Lin', jobGuids: [], deleted: false }],
+        ['e-3', { name: 'Mara Chen', jobGuids: [], deleted: false }],
+      ]),
+    };
+    const day = baseDay();
+    day.timeEntries = [
+      entry('e-1', 'j-srv', at('17:00'), at('22:00')),
+      entry('e-2', 'j-srv', at('17:00'), at('22:00')),
+      entry('e-3', 'j-bar', at('17:00'), at('22:00')),
+    ];
+    const names = buildTipoutInputs(day, named, config, CASH).input.periods.Dinner!.staff.map((s) => s.name);
+    expect(names.sort()).toEqual(['Mara C.', 'Sam Lee', 'Sam Lin']);
   });
 });
 

@@ -52,6 +52,11 @@ class FillCashOut(unittest.TestCase):
                          [("Priya (Host)", "Host"), ("Tomas (Barback)", "Barback"), (None, None)])
         self.assertEqual([ws[f"B{r}"].value for r in (30, 31, 32, 33)], ["Mara (Bartender)", "Devon (Server)", "Sam (Server)", None])
         self.assertEqual(ws["B26"].value, "=B16-B19-B21")  # formulas are left intact
+        self.assertEqual(ws["D29"].value, "Hourly rate (ref)")
+        # Hourly rate written as a figure on every bar/server row: 1166.25 remainder / 19 h
+        self.assertEqual([ws[f"D{r}"].value for r in (30, 31, 32)], [61.38, 61.38, 61.38])
+        self.assertEqual(ws["D33"].value, '=IF(AND(C33>0,$C$40>0),$B$26/$C$40,"")')
+        self.assertTrue(wb.calculation.fullCalcOnLoad)
 
     def evaluate(self):
         solution = formulas.ExcelModel().loads(str(self.out)).finish().calculate()

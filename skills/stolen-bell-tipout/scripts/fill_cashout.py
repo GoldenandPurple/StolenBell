@@ -135,6 +135,9 @@ def fill(doc: dict, out: Path, completed_by: str | None) -> dict:
             ws[f"B{row}"], ws[f"C{row}"], ws[f"E{row}"] = person, float(hours), role
         for row, (person, hours) in zip(TIPPED_ROWS, tipped):
             ws[f"B{row}"], ws[f"C{row}"] = person, float(hours)
+            # Hourly rate (ref): the bar/server remainder / their total hours, written as a figure so
+            # it shows even where the sheet isn't recalculated (previews, phones).
+            ws[f"D{row}"] = float(results[name].hourly_rate)
         # copy_worksheet doesn't carry data validation; restore the dropdowns.
         for cells, choices in (("E4", '"Lunch,Dinner"'), ("E23:E25", '"Host,Barback,Busser,Runner"')):
             dv = DataValidation(type="list", formula1=choices, allow_blank=True)
@@ -146,6 +149,7 @@ def fill(doc: dict, out: Path, completed_by: str | None) -> dict:
         ws.sheet_properties.pageSetUpPr = template.sheet_properties.pageSetUpPr
     for sheet in [s for s in wb.sheetnames if s not in periods]:
         del wb[sheet]
+    wb.calculation.fullCalcOnLoad = True  # make Excel work out every formula as soon as it's opened
     wb.save(out)
     return {
         "written": str(out),

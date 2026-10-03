@@ -108,6 +108,13 @@ const centsToDollars = (record: Record<string, number>) =>
       .map(([key, value]) => [key, dollars(value)]),
   );
 
+/** "Mara Chen" -> "Mara C.". Single names, and fallback labels like "Unknown employee (…)", are kept as they are. */
+export function shortName(full: string): string {
+  const parts = full.trim().split(/\s+/);
+  if (parts.length < 2 || full.includes('(')) return full.trim();
+  return `${parts[0]} ${parts[parts.length - 1]!.charAt(0).toUpperCase()}.`;
+}
+
 type Shares = Record<Period, number>;
 
 const oneHot = (period: Period): Shares => (period === 'Lunch' ? { Lunch: 1, Dinner: 0 } : { Lunch: 0, Dinner: 1 });
@@ -414,13 +421,21 @@ export function buildTipoutInputs(day: DayData, ref: Reference, config: TipoutCo
     }
   }
 
-  // The engine keys payouts by name, so two employees with the same name get their ID appended.
-  const guids = new Set(PERIODS.flatMap((period) => [...acc[period].hours.values()].map((slot) => slot.guid)));
-  const nameCounts = new Map<string, number>();
-  for (const guid of guids) nameCounts.set(staffName(ref, guid), (nameCounts.get(staffName(ref, guid)) ?? 0) + 1);
+  // Names are "First L." on the sheet. The engine keys payouts by name, so if two people would get
+  // the same short name they're shown in full, and if their full names match too, with their ID.
+  const guids = [...new Set(PERIODS.flatMap((period) => [...acc[period].hours.values()].map((slot) => slot.guid)))];
+  const countBy = (name: (guid: string) => string) => {
+    const counts = new Map<string, number>();
+    for (const guid of guids) counts.set(name(guid), (counts.get(name(guid)) ?? 0) + 1);
+    return counts;
+  };
+  const shortCounts = countBy((guid) => shortName(staffName(ref, guid)));
+  const fullCounts = countBy((guid) => staffName(ref, guid));
   const displayName = (guid: string) => {
-    const base = staffName(ref, guid);
-    return nameCounts.get(base)! > 1 ? `${base} (${guid.slice(0, 6)})` : base;
+    const full = staffName(ref, guid);
+    const short = shortName(full);
+    if (shortCounts.get(short)! === 1) return short;
+    return fullCounts.get(full)! > 1 ? `${full} (${guid.slice(0, 6)})` : full;
   };
 
   const periods: Partial<Record<Period, PeriodInput>> = {};

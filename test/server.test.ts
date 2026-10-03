@@ -56,10 +56,10 @@ describe('MCP server (demo mode)', () => {
     const dinnerRoles = new Set(data.input.periods.Dinner.staff.map((s: { role: string }) => s.role));
     expect(dinnerRoles).toEqual(new Set(['Bartender', 'Server', 'Host', 'Barback', 'Busser', 'Kitchen'])); // Saturday: barback and busser work
     // Devon serves lunch and bartends dinner; Casey's shift crosses 16:00.
-    expect(data.input.periods.Lunch.staff).toContainEqual({ name: 'Devon Patel', role: 'Server', hours: 4.75 });
-    expect(data.input.periods.Dinner.staff).toContainEqual({ name: 'Devon Patel', role: 'Bartender', hours: 6 });
-    expect(data.input.periods.Lunch.staff).toContainEqual({ name: 'Casey Morales', role: 'Bartender', hours: 1 });
-    expect(data.input.periods.Dinner.staff).toContainEqual({ name: 'Casey Morales', role: 'Bartender', hours: 8 });
+    expect(data.input.periods.Lunch.staff).toContainEqual({ name: 'Devon P.', role: 'Server', hours: 4.75 });
+    expect(data.input.periods.Dinner.staff).toContainEqual({ name: 'Devon P.', role: 'Bartender', hours: 6 });
+    expect(data.input.periods.Lunch.staff).toContainEqual({ name: 'Casey M.', role: 'Bartender', hours: 1 });
+    expect(data.input.periods.Dinner.staff).toContainEqual({ name: 'Casey M.', role: 'Bartender', hours: 8 });
 
     const file = join(mkdtempSync(join(tmpdir(), 'tipout-')), 'input.json');
     writeFileSync(file, JSON.stringify(data.input));
