@@ -13,18 +13,21 @@ periods:
 foodCategories:
   - Food
 
-# Toast job title -> tip-out role. Roles: Bartender, Server, Host, Barback, Kitchen,
+# Toast job title -> tip-out role. Roles: Bartender, Server, Host, Barback, Busser, Kitchen,
 # or "ignore" to leave a job out entirely. Any job not listed stops the run so it can be
 # mapped deliberately rather than guessed.
 roles:
   Bartender: Bartender
+  Lead Bartender: Bartender
   Server: Server
+  Lead Server: Server
   Host: Host
   Barback: Barback
+  Busser: Busser
+  Kitchen All Rounder: Kitchen
+  Chef de Partie: Kitchen
+  Sous Chef: Kitchen
   Chef: Kitchen
-  Line Cook: Kitchen
-  Dishwasher: Kitchen
-  Manager: ignore
 
 # Optional: override the restaurant time zone from Toast (IANA name, e.g. America/Vancouver).
 # timeZone: America/Vancouver

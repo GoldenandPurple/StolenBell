@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { parse } from 'yaml';
 import { z } from 'zod';
 
-export const TIPOUT_ROLES = ['Bartender', 'Server', 'Host', 'Barback', 'Kitchen'] as const;
+export const TIPOUT_ROLES = ['Bartender', 'Server', 'Host', 'Barback', 'Busser', 'Kitchen'] as const;
 export type TipoutRole = (typeof TIPOUT_ROLES)[number];
 
 const clock = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'use 24-hour HH:MM');

@@ -5,7 +5,7 @@ import type { ToastEmployee, ToastJob, ToastOrder, ToastSelection, ToastTimeEntr
 /**
  * Deterministic synthetic restaurant used when TOAST_MCP_MODE=demo.
  * The same business date always produces the same data. Shaped like Stolen
- * Bell: lunch and dinner service, Bartender/Server/Host/Barback front of house.
+ * Bell: lunch and dinner service, Bartender/Server/Host/Barback/Busser front of house.
  */
 
 const TIME_ZONE = 'America/Vancouver';
@@ -15,9 +15,10 @@ const JOBS: ToastJob[] = [
   { guid: 'job-bartender', title: 'Bartender', tipped: true },
   { guid: 'job-barback', title: 'Barback', tipped: true },
   { guid: 'job-host', title: 'Host', tipped: true },
+  { guid: 'job-busser', title: 'Busser', tipped: true },
   { guid: 'job-chef', title: 'Chef', tipped: false },
-  { guid: 'job-cook', title: 'Line Cook', tipped: false },
-  { guid: 'job-dish', title: 'Dishwasher', tipped: false },
+  { guid: 'job-cook', title: 'Chef de Partie', tipped: false },
+  { guid: 'job-dish', title: 'Kitchen All Rounder', tipped: false },
 ];
 
 const STAFF: Record<string, [first: string, last: string, jobs: string[], wage: number]> = {
@@ -33,6 +34,7 @@ const STAFF: Record<string, [first: string, last: string, jobs: string[], wage: 
   'emp-10': ['Taylor', 'Kowalski', ['job-cook'], 21],
   'emp-11': ['Alex', 'Haddad', ['job-cook'], 21],
   'emp-12': ['Rowan', 'Singh', ['job-dish'], 17.4],
+  'emp-13': ['Quinn', 'Fraser', ['job-busser'], 17.4],
 };
 
 const CATEGORIES = [
@@ -81,7 +83,12 @@ function schedule(weekend: boolean): Shift[] {
     ['emp-03', 'job-server', '16:00', '23:00', '19:00'],
     ['emp-04', 'job-server', '16:30', '22:30'],
     ['emp-07', 'job-host', '16:30', '21:30'],
-    ...(weekend ? ([['emp-08', 'job-barback', '17:00', '23:30']] as Shift[]) : []),
+    ...(weekend
+      ? ([
+          ['emp-08', 'job-barback', '17:00', '23:30'],
+          ['emp-13', 'job-busser', '17:30', '22:30'],
+        ] as Shift[])
+      : []),
     ['emp-09', 'job-chef', '14:00', '23:00'],
     ['emp-11', 'job-cook', '16:00', '23:00'],
     ['emp-12', 'job-dish', '17:00', '00:00'],

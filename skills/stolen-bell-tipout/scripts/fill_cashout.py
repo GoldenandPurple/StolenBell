@@ -55,8 +55,8 @@ def form_math(p: dict, support: list, tipped: list) -> dict:
     """What the form's formulas will calculate, mirroring CashOut_Form.xlsx cell by cell."""
     pool = _d(p.get("auto_gratuity")) + _d(p.get("pool_card_tips")) + _d(p.get("cash_tips_manual"))  # B16
     kitchen = Decimal("0.1") * _d(p.get("gross_food_sales"))  # B19
-    roles = {role for _, role, h in support if h > 0}  # B20: which support roles have hours
-    rate = Decimal("0.0225") if {"Host", "Barback"} <= roles else Decimal("0.015") if roles else Decimal("0")
+    roles = {role for _, role, h in support if h > 0}  # B20: how many different support roles have hours
+    rate = Decimal("0.0225") if len(roles) >= 2 else Decimal("0.015") if roles else Decimal("0")
     support_total = rate * _d(p.get("net_sales"))  # B21
     remainder = pool - kitchen - support_total  # B26
     s_hours = sum((h for _, _, h in support), Decimal("0"))
@@ -136,7 +136,7 @@ def fill(doc: dict, out: Path, completed_by: str | None) -> dict:
         for row, (person, hours) in zip(TIPPED_ROWS, tipped):
             ws[f"B{row}"], ws[f"C{row}"] = person, float(hours)
         # copy_worksheet doesn't carry data validation; restore the dropdowns.
-        for cells, choices in (("E4", '"Lunch,Dinner"'), ("E23:E25", '"Host,Barback"')):
+        for cells, choices in (("E4", '"Lunch,Dinner"'), ("E23:E25", '"Host,Barback,Busser"')):
             dv = DataValidation(type="list", formula1=choices, allow_blank=True)
             ws.add_data_validation(dv)
             dv.add(cells)

@@ -52,7 +52,7 @@ Dates are Toast business dates (`YYYY-MM-DD`). A range can be up to 31 days.
 The tip-out is split between two pieces so the rules live in exactly one place:
 
 1. **This server's `get_tipout_inputs` tool** pulls the day from Toast and buckets it into Lunch and Dinner.
-2. **The [Stolen Bell tip-out skill](skills/stolen-bell-tipout/SKILL.md)** feeds that into its engine, [`scripts/tipout.py`](skills/stolen-bell-tipout/scripts/tipout.py), which applies the house rules: a pool of card tips, auto-gratuity and the counted cash, 10% of food sales to the kitchen, 2.25% / 1.5% of net sales to Host and Barback, and the remainder to Bartenders and Servers by hours. The skill then shows the GM a draft to approve and fills Steph's Cash Out form with [`scripts/fill_cashout.py`](skills/stolen-bell-tipout/scripts/fill_cashout.py). That script won't write a form whose formulas would disagree with the engine.
+2. **The [Stolen Bell tip-out skill](skills/stolen-bell-tipout/SKILL.md)** feeds that into its engine, [`scripts/tipout.py`](skills/stolen-bell-tipout/scripts/tipout.py), which applies the house rules: a pool of card tips, auto-gratuity and the counted cash, 10% of food sales to the kitchen, 2.25% / 1.5% of net sales to support staff (Host, Barback, Busser), and the remainder to Bartenders and Servers by hours. The skill then shows the GM a draft to approve and fills Steph's Cash Out form with [`scripts/fill_cashout.py`](skills/stolen-bell-tipout/scripts/fill_cashout.py). That script won't write a form whose formulas would disagree with the engine.
 
 To change the **rules**, edit `tipout.py` (and its tests). To change how **Toast data is mapped**, edit [`config/tipout.yaml`](config/tipout.yaml):
 
@@ -60,7 +60,7 @@ To change the **rules**, edit `tipout.py` (and its tests). To change how **Toast
 | --- | --- |
 | `periods.lunchStart`, `periods.dinnerStart` | Lunch runs 11:00–16:00 and Dinner 16:00–close, in restaurant local time. After midnight still counts as Dinner. Hours before 11:00 count toward neither period. |
 | `foodCategories` | Toast sales categories that count as food for the kitchen's share. |
-| `roles` | Toast job title → `Bartender`, `Server`, `Host`, `Barback`, `Kitchen`, or `ignore`. A job that isn't listed stops the run, so it gets mapped on purpose rather than guessed. |
+| `roles` | Toast job title → `Bartender`, `Server`, `Host`, `Barback`, `Busser`, `Kitchen`, or `ignore`. A job that isn't listed stops the run, so it gets mapped on purpose rather than guessed. |
 | `timeZone` | Optional override if Toast doesn't return the restaurant's time zone. |
 
 How `get_tipout_inputs` buckets the day:

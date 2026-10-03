@@ -43,6 +43,15 @@ class Rules(unittest.TestCase):
         self.assertEqual((both.support_total, one.support_total, none.support_total),
                          (D("22.50"), D("15.00"), D("0.00")))
 
+    def test_busser_is_support(self):
+        host_busser = compute_period("Dinner", period([{"name": "H", "role": "Host", "hours": 4},
+                                                       {"name": "U", "role": "Busser", "hours": 4}], net=1000))
+        two_bussers = compute_period("Dinner", period([{"name": "U1", "role": "Busser", "hours": 4},
+                                                       {"name": "U2", "role": "Busser", "hours": 2}], net=1000))
+        self.assertEqual(host_busser.support_total, D("22.50"))
+        self.assertEqual(two_bussers.support_total, D("15.00"))
+        self.assertEqual(two_bussers.support_payouts, {"U1": D("10.00"), "U2": D("5.00")})
+
     def test_auto_gratuity_and_cash_are_pooled(self):
         p = period([{"name": "S", "role": "Server", "hours": 4}], card=100, cash=25)
         p["auto_gratuity"] = 40

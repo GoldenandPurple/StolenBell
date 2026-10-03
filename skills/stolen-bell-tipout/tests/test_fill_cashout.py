@@ -95,6 +95,23 @@ class FillCashOut(unittest.TestCase):
         self.assertEqual(cell("Dinner", "B20"), Decimal("0.0225"))
         self.assertAlmostEqual(cell("Dinner", "D25"), Decimal("45"), places=2)  # 90 support x 6/12 h
 
+    @unittest.skipIf(formulas is None, "formulas not installed")
+    def test_host_barback_and_busser_on_the_form(self):
+        doc = one_period([{"name": "H", "role": "Host", "hours": 5}, {"name": "B", "role": "Barback", "hours": 4},
+                          {"name": "U", "role": "Busser", "hours": 3}, {"name": "S", "role": "Server", "hours": 6}])
+        self.assertEqual(fill(doc, self.out, None)["problems"], [])
+        cell = self.evaluate()
+        self.assertEqual(cell("Dinner", "B20"), Decimal("0.0225"))
+        self.assertAlmostEqual(cell("Dinner", "D25"), Decimal("22.5"), places=2)  # 90 support x 3/12 h
+        self.assertEqual(cell("Dinner", "B45"), 0)
+
+    @unittest.skipIf(formulas is None, "formulas not installed")
+    def test_host_and_busser_get_the_two_role_rate(self):
+        doc = one_period([{"name": "H", "role": "Host", "hours": 4}, {"name": "U", "role": "Busser", "hours": 4},
+                          {"name": "S", "role": "Server", "hours": 6}])
+        self.assertEqual(fill(doc, self.out, None)["problems"], [])
+        self.assertEqual(self.evaluate()("Dinner", "B20"), Decimal("0.0225"))
+
     def test_refuses_when_support_staff_do_not_fit(self):
         staff = [{"name": f"H{i}", "role": "Host", "hours": 2} for i in range(4)]
         summary = fill(one_period(staff + [{"name": "S", "role": "Server", "hours": 6}]), self.out, None)
