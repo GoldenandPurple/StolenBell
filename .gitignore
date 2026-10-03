@@ -3,3 +3,5 @@ dist/
 .env
 config/tip-rules.local.yaml
 *.log
+__pycache__/
+*.pyc
