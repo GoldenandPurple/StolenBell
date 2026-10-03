@@ -112,6 +112,13 @@ class FillCashOut(unittest.TestCase):
         self.assertEqual(fill(doc, self.out, None)["problems"], [])
         self.assertEqual(self.evaluate()("Dinner", "B20"), Decimal("0.0225"))
 
+    @unittest.skipIf(formulas is None, "formulas not installed")
+    def test_runner_counts_as_a_support_role_on_the_form(self):
+        doc = one_period([{"name": "R", "role": "Runner", "hours": 4}, {"name": "B", "role": "Busser", "hours": 4},
+                          {"name": "S", "role": "Server", "hours": 6}])
+        self.assertEqual(fill(doc, self.out, None)["problems"], [])
+        self.assertEqual(self.evaluate()("Dinner", "B20"), Decimal("0.0225"))
+
     def test_refuses_when_support_staff_do_not_fit(self):
         staff = [{"name": f"H{i}", "role": "Host", "hours": 2} for i in range(4)]
         summary = fill(one_period(staff + [{"name": "S", "role": "Server", "hours": 6}]), self.out, None)

@@ -162,7 +162,7 @@ The secret is now stored in this file on this computer, under the GM's Windows l
 
 This time you should see the real restaurant name. Check two things in the reply:
 
-- **Unmapped jobs** should be empty. If a Toast job is listed there, send its exact name to whoever maintains the setup so it can be added to `config/tipout.yaml`.
+- **Unlisted jobs** are Toast jobs that aren't named in `config/tipout.yaml`. They share the bar/server remainder automatically. If one of them should be support, kitchen or not tipped, send its exact name to whoever maintains the setup so it can be added.
 - The **sales categories** should include **Food**. If the food category is called something else in Toast, that needs updating in `config/tipout.yaml` too.
 
 ## 8. Check it against Steph's sheets before paying from it

@@ -10,7 +10,7 @@ this module does only the math so the rules live in one auditable place.
 Rules (per service period, Lunch 11:00-16:00 and Dinner 16:00-close):
   pool       = card tips + auto-gratuity in the period + the period's cash till count
   kitchen    = 10% of gross food sales       -> single lump, Chef splits later
-  support    = % of net sales, split across support staff (Host/Barback/Busser) by hours
+  support    = % of net sales, split across support staff (Host/Barback/Busser/Runner) by hours
                  2.25% if TWO OR MORE different support roles worked
                  1.50% if exactly ONE support role worked
                  0%    if none worked
@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 CENT = Decimal("0.01")
 
 TIPPED_ROLES = {"Bartender", "Server"}      # share the remainder
-SUPPORT_ROLES = {"Host", "Barback", "Busser"}  # share the support cut
+SUPPORT_ROLES = {"Host", "Barback", "Busser", "Runner"}  # share the support cut
 # Kitchen: receives a lump, not allocated here.
 
 KITCHEN_RATE = Decimal("0.10")

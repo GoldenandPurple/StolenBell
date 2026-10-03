@@ -28,8 +28,8 @@ For each period:
   at the 4:00 changeover (Lunch) and at close (Dinner). The GM gives the skill both counts
   (cash is always a manual entry); everything else comes from Toast.
 - **Kitchen** = 10% of gross food sales → paid as a single lump; the Chef divides it.
-- **Support** = % of net sales, split across the support staff (Host, Barback, Busser) by
-  hours: **2.25%** if two or more different support roles worked (e.g. a Host and a Barback),
+- **Support** = % of net sales, split across the support staff (Host, Barback, Busser, Runner)
+  by hours: **2.25%** if two or more different support roles worked (e.g. a Host and a Barback),
   **1.5%** if only one support role worked, 0% if none did.
 - **Remainder** = pool − kitchen − support → split across **Bartenders and Servers only**,
   by hours worked in that period.
@@ -61,7 +61,7 @@ It does the bucketing for you:
   `cash_sales` (cash payments, excluding tips) is only for the Cash Out form.
 - **Hours** come from clock-in/clock-out, split at the Lunch/Dinner boundary, with unpaid
   breaks removed. Time before Lunch starts counts toward neither period. Toast jobs are
-  mapped to `Bartender`, `Server`, `Host`, `Barback`, `Busser` or `Kitchen` by `config/tipout.yaml`
+  mapped to `Bartender`, `Server`, `Host`, `Barback`, `Busser`, `Runner` or `Kitchen` by `config/tipout.yaml`
   in the MCP server repo.
 
 Read the result:
@@ -98,7 +98,7 @@ cash) lands on a named person or the kitchen lump.
   figures. If it exits with `problems` (more staff than the form has rows, or a due back),
   **no form is written**. Show the problems and
   give the GM the engine's payout table instead; don't fill the form by hand to force it.
-  Support rows get each person's role (Host, Barback or Busser); the form sets the support
+  Support rows get each person's role (Host, Barback, Busser or Runner); the form sets the support
   rate from which roles worked.
 - State plainly that this is a draft to review and that **no one is paid and nothing is
   written back** until the GM acts on it outside this skill.

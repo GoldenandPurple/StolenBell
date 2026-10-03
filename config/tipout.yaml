@@ -21,21 +21,36 @@ cardTipSource: time_entries
 foodCategories:
   - Food
 
-# Toast job title -> tip-out role. Roles: Bartender, Server, Host, Barback, Busser, Kitchen,
-# or "ignore" to leave a job out entirely. Any job not listed stops the run so it can be
-# mapped deliberately rather than guessed.
+# Toast job title -> tip-out role. Roles: Bartender, Server (both share the bar/server remainder),
+# Host, Barback, Busser, Runner (support), Kitchen, or "ignore" to leave a job out entirely.
+# Matching ignores upper/lower case but is otherwise exact ("Chef" and "Chef OFFICE" are different jobs).
 roles:
+  # Bar & servers
   Bartender: Bartender
   Lead Bartender: Bartender
   Server: Server
   Lead Server: Server
+  # Support
   Host: Host
   Barback: Barback
   Busser: Busser
-  Kitchen All Rounder: Kitchen
-  Chef de Partie: Kitchen
-  Sous Chef: Kitchen
+  Runner: Runner
+  # Kitchen
   Chef: Kitchen
+  Sous Chef: Kitchen
+  Chef de Partie: Kitchen
+  Kitchen All Rounder: Kitchen
+  Cook: Kitchen
+  # Not tipped
+  Chef OFFICE: ignore
+  Admin: ignore
+  General Manager: ignore
+  Owner: ignore
+  Lead Bartender ADMIN: ignore
+
+# Any Toast job not listed above shares the bar/server remainder. The tool notes which jobs were
+# handled this way on each run. Use "stop" instead to make every job be listed deliberately.
+otherJobs: Server
 
 # Optional: override the restaurant time zone from Toast (IANA name, e.g. America/Vancouver).
 # timeZone: America/Vancouver

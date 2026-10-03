@@ -43,6 +43,12 @@ class Rules(unittest.TestCase):
         self.assertEqual((both.support_total, one.support_total, none.support_total),
                          (D("22.50"), D("15.00"), D("0.00")))
 
+    def test_runner_is_support(self):
+        r = compute_period("Dinner", period([{"name": "R", "role": "Runner", "hours": 4},
+                                             {"name": "H", "role": "Host", "hours": 4}], net=1000))
+        self.assertEqual(r.support_total, D("22.50"))
+        self.assertEqual(r.support_payouts, {"R": D("11.25"), "H": D("11.25")})
+
     def test_busser_is_support(self):
         host_busser = compute_period("Dinner", period([{"name": "H", "role": "Host", "hours": 4},
                                                        {"name": "U", "role": "Busser", "hours": 4}], net=1000))

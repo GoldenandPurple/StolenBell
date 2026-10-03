@@ -45,7 +45,8 @@ describe('MCP server (demo mode)', () => {
     const { data } = await call('get_restaurant_setup');
     expect(data.dataSource).toMatch(/DEMO/);
     expect(data.jobs.map((j: { title: string }) => j.title)).toContain('Bartender');
-    expect(data.tipout.unmappedJobs).toEqual([]);
+    expect(data.tipout.unlistedJobs).toEqual([]);
+    expect(data.tipout.otherJobs).toBe('Server');
   });
 
   it('produces tip-out inputs the skill engine accepts, and the engine reconciles them', async () => {

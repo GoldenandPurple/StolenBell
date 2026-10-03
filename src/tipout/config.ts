@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { parse } from 'yaml';
 import { z } from 'zod';
 
-export const TIPOUT_ROLES = ['Bartender', 'Server', 'Host', 'Barback', 'Busser', 'Kitchen'] as const;
+export const TIPOUT_ROLES = ['Bartender', 'Server', 'Host', 'Barback', 'Busser', 'Runner', 'Kitchen'] as const;
 export type TipoutRole = (typeof TIPOUT_ROLES)[number];
 
 const clock = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'use 24-hour HH:MM');
@@ -19,6 +19,8 @@ export const TipoutConfigSchema = z
     //   payment = rebuilt from checks, all to the period each payment was made in.
     cardTipSource: z.enum(['time_entries', 'check_time', 'check_items', 'payment']).default('time_entries'),
     roles: z.record(z.string(), z.enum([...TIPOUT_ROLES, 'ignore'])).default({}),
+    // What happens to a Toast job that isn't listed under roles: give it a role, ignore it, or stop the run.
+    otherJobs: z.enum([...TIPOUT_ROLES, 'ignore', 'stop']).default('stop'),
     timeZone: z.string().optional(),
   })
   .refine((config) => config.periods.lunchStart < config.periods.dinnerStart, {

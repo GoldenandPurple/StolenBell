@@ -263,6 +263,28 @@ describe('buildTipoutInputs with tips from Toast shifts (default)', () => {
   });
 });
 
+describe('jobs not listed in the config', () => {
+  it('can give unlisted jobs a role and say so', () => {
+    const catchAll = TipoutConfigSchema.parse({ ...config, otherJobs: 'Server' });
+    const day = baseDay();
+    day.timeEntries.push(entry('e-sam1', 'j-som', at('17:00'), at('22:00')));
+    const result = buildTipoutInputs(day, ref, catchAll, CASH);
+    expect(result.ready).toBe(true);
+    expect(result.input.periods.Dinner!.staff).toContainEqual({ name: 'Sam', role: 'Server', hours: 5 });
+    expect(result.details.jobMapping.Sommelier).toBe('Server (not listed; otherJobs)');
+    expect(result.issues).toContainEqual({ severity: 'check', message: expect.stringMatching(/treated as Server: Sommelier/) });
+  });
+
+  it('lets an explicit "ignore" win over the catch-all', () => {
+    const catchAll = TipoutConfigSchema.parse({ ...config, otherJobs: 'Server', roles: { ...config.roles, Sommelier: 'ignore' } });
+    const day = baseDay();
+    day.timeEntries.push(entry('e-sam1', 'j-som', at('17:00'), at('22:00')));
+    const result = buildTipoutInputs(day, ref, catchAll, CASH);
+    expect(result.input.periods.Dinner!.staff.map((s) => s.name)).not.toContain('Sam');
+    expect(result.issues.map((i) => i.message).join()).not.toMatch(/treated as/);
+  });
+});
+
 describe('zonedTimeToUtc', () => {
   it('handles daylight saving on both sides of the change', () => {
     expect(new Date(zonedTimeToUtc('2026-07-01', '16:00', TZ)).toISOString()).toBe('2026-07-01T23:00:00.000Z');

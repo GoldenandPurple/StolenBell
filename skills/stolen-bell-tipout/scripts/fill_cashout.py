@@ -136,7 +136,7 @@ def fill(doc: dict, out: Path, completed_by: str | None) -> dict:
         for row, (person, hours) in zip(TIPPED_ROWS, tipped):
             ws[f"B{row}"], ws[f"C{row}"] = person, float(hours)
         # copy_worksheet doesn't carry data validation; restore the dropdowns.
-        for cells, choices in (("E4", '"Lunch,Dinner"'), ("E23:E25", '"Host,Barback,Busser"')):
+        for cells, choices in (("E4", '"Lunch,Dinner"'), ("E23:E25", '"Host,Barback,Busser,Runner"')):
             dv = DataValidation(type="list", formula1=choices, allow_blank=True)
             ws.add_data_validation(dv)
             dv.add(cells)

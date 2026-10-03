@@ -285,6 +285,7 @@ export function buildTipoutInputs(day: DayData, ref: Reference, config: TipoutCo
   const roleMap = new Map(Object.entries(config.roles).map(([job, role]) => [normalize(job), role]));
   const jobMapping: Record<string, string> = {};
   const unmapped = new Set<string>();
+  const unlistedJobs = new Set<string>();
   const windows: Record<Period, [number, number]> = { Lunch: [lunchStart, dinnerStart], Dinner: [dinnerStart, Infinity] };
 
   // Card tips and auto-gratuity as Toast credited them to each shift (its own allocation).
@@ -298,8 +299,10 @@ export function buildTipoutInputs(day: DayData, ref: Reference, config: TipoutCo
     const guid = entry.employeeReference?.guid;
     if (!guid) continue;
     const job = jobTitle(ref, entry);
-    const role = roleMap.get(normalize(job));
-    jobMapping[job] = role ?? 'UNMAPPED';
+    const listed = roleMap.get(normalize(job));
+    const role = listed ?? (config.otherJobs === 'stop' ? undefined : config.otherJobs);
+    jobMapping[job] = listed ?? (role ? `${role} (not listed; otherJobs)` : 'UNMAPPED');
+    if (!listed && role) unlistedJobs.add(job);
     const name = staffName(ref, guid);
     const clockIn = parseInstant(entry.inDate);
     const clockOut = parseInstant(entry.outDate);
@@ -383,6 +386,12 @@ export function buildTipoutInputs(day: DayData, ref: Reference, config: TipoutCo
   }
   for (const job of unmapped) {
     stop(`Toast job "${job}" isn't mapped to a tip-out role. Add it under roles in the tip-out config (or map it to "ignore").`);
+  }
+  if (unlistedJobs.size) {
+    check(
+      `Not listed in the tip-out config, so treated as ${config.otherJobs === 'ignore' ? 'not tipped' : config.otherJobs}: ${[...unlistedJobs].join(', ')}. ` +
+        `If that's wrong, add them under roles.`,
+    );
   }
 
   const checkTips: Record<Period, { card: number; gratuity: number }> = {

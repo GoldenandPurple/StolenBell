@@ -68,7 +68,9 @@ export function createServer({ config, repo, loadTipoutConfig }: ServerDeps): Mc
           periods: tipout.periods,
           foodCategories: tipout.foodCategories,
           roles: tipout.roles,
-          unmappedJobs: [...ref.jobs.values()]
+          otherJobs: tipout.otherJobs,
+          /** Toast jobs not listed under roles; they're handled per otherJobs. */
+          unlistedJobs: [...ref.jobs.values()]
             .map((job) => job.title)
             .filter((title) => !Object.keys(tipout.roles).some((job) => job.toLowerCase() === title.toLowerCase())),
         },
