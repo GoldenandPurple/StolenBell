@@ -1,0 +1,31 @@
+{
+  "business_date": "2026-09-27",
+  "periods": {
+    "Lunch": {
+      "pool_card_tips": 540.00,
+      "cash_tips_manual": null,
+      "gross_food_sales": 2100.00,
+      "net_sales": 3800.00,
+      "staff": [
+        {"name": "Mara (Bartender)", "role": "Bartender", "hours": 5.0},
+        {"name": "Devon (Server)",   "role": "Server",    "hours": 4.5},
+        {"name": "Priya (Host)",     "role": "Host",      "hours": 4.0},
+        {"name": "Luis (Kitchen)",   "role": "Kitchen",   "hours": 5.0}
+      ]
+    },
+    "Dinner": {
+      "pool_card_tips": 1800.00,
+      "cash_tips_manual": null,
+      "gross_food_sales": 4200.00,
+      "net_sales": 9500.00,
+      "staff": [
+        {"name": "Mara (Bartender)", "role": "Bartender", "hours": 8.0},
+        {"name": "Devon (Server)",   "role": "Server",    "hours": 6.0},
+        {"name": "Sam (Server)",     "role": "Server",    "hours": 5.0},
+        {"name": "Priya (Host)",     "role": "Host",      "hours": 5.0},
+        {"name": "Tomas (Barback)",  "role": "Barback",   "hours": 4.0},
+        {"name": "Luis (Kitchen)",   "role": "Kitchen",   "hours": 6.0}
+      ]
+    }
+  }
+}
