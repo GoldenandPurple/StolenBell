@@ -9,12 +9,13 @@ periods:
   lunchStart: "11:00"
   dinnerStart: "16:00"
 
-# How a check's card tips and auto-gratuity are shared between Lunch and Dinner when the check
-# spans both (e.g. opened 3:30, paid 4:30):
-#   time    - in proportion to how long the check was open in each period (default)
-#   items   - in proportion to the sales rung in each period
-#   payment - all to the period it was paid in
-cardTipSplit: time
+# Where each period's card tips and auto-gratuity come from:
+#   time_entries - what Toast credited to each shift (Toast's own allocation, as on its Tip Summary).
+#                  A shift that crosses into the next period is split by time worked on each side. (default)
+#   check_time   - rebuilt from the day's checks; a check open across both periods is shared by time open in each
+#   check_items  - rebuilt from the day's checks; shared by the sales rung in each period
+#   payment      - rebuilt from the day's checks; all to the period each payment was made in
+cardTipSource: time_entries
 
 # Toast sales categories that count as food for the kitchen's 10%.
 foodCategories:

@@ -162,7 +162,7 @@ export function createServer({ config, repo, loadTipoutConfig }: ServerDeps): Mc
     {
       title: 'Tip-out inputs',
       description:
-        'Pulls everything the Stolen Bell tip-out needs for one business day, split into Lunch and Dinner: card tips and auto-gratuity (a check open across both periods is shared between them, by default in proportion to the time it was open in each), ' +
+        'Pulls everything the Stolen Bell tip-out needs for one business day, split into Lunch and Dinner: card tips and auto-gratuity as Toast credited them to each shift (a shift crossing into the next period is split by time worked), ' +
         'food and net sales by when the order was opened, cash sales for the Cash Out form, and each person\'s hours by tip-out role, split at the period boundary with unpaid breaks removed. ' +
         'Cash tips are not in Toast: pass the GM\'s till counts (4:00 changeover for Lunch, close for Dinner) as cashLunch and cashDinner. ' +
         '`input` is the exact document the tip-out engine (skills/stolen-bell-tipout/scripts/tipout.py) reads. ' +

@@ -36,8 +36,10 @@ const ref: Reference = {
 
 const CASH = { Lunch: 0, Dinner: 0 };
 
+// Most tests below rebuild tips from the checks; the shift-based default has its own block.
 const config = TipoutConfigSchema.parse({
   roles: { Bartender: 'Bartender', Server: 'Server', Host: 'Host', Chef: 'Kitchen' },
+  cardTipSource: 'check_time',
 });
 
 const entry = (employee: string, job: string, inDate: string, outDate: string | null, extra: Partial<ToastTimeEntry> = {}): ToastTimeEntry => ({
@@ -90,20 +92,20 @@ describe('buildTipoutInputs', () => {
     // The 15:30-16:10 check's $10 tip: 30 min lunch, 10 min dinner -> $7.50 / $2.50.
     expect(result.input.periods.Lunch).toMatchObject({ pool_card_tips: 32.5, gross_food_sales: 150, net_sales: 170 });
     expect(result.input.periods.Dinner).toMatchObject({ pool_card_tips: 62.5, gross_food_sales: 240, net_sales: 330, cash_tips_manual: 0 });
-    expect(result.details.checksSpanningBothPeriods).toEqual({ count: 1, toLunch: 7.5, toDinner: 2.5 });
+    expect(result.details.tips.spanningBothPeriods).toEqual({ count: 1, toLunch: 7.5, toDinner: 2.5 });
     expect(result.details.perPeriod.Dinner.cashTipsRecordedInToast).toBe(9);
   });
 
   it('can put card tips in the period they were paid instead', () => {
-    const byPayment = TipoutConfigSchema.parse({ ...config, cardTipSplit: 'payment' });
+    const byPayment = TipoutConfigSchema.parse({ ...config, cardTipSource: 'payment' });
     const result = buildTipoutInputs(baseDay(), ref, byPayment, CASH);
     expect(result.input.periods.Lunch!.pool_card_tips).toBe(25);
     expect(result.input.periods.Dinner!.pool_card_tips).toBe(70);
-    expect(result.details.checksSpanningBothPeriods.count).toBe(0);
+    expect(result.details.tips.spanningBothPeriods.count).toBe(0);
   });
 
   it('can share card tips by the sales rung in each period', () => {
-    const byItems = TipoutConfigSchema.parse({ ...config, cardTipSplit: 'items' });
+    const byItems = TipoutConfigSchema.parse({ ...config, cardTipSource: 'check_items' });
     const day = baseDay();
     const spanning = order(at('15:00'), at('17:00'), 0, 0, 20);
     spanning.checks![0]!.selections = [
@@ -214,6 +216,50 @@ describe('buildTipoutInputs', () => {
     const names = buildTipoutInputs(day, ref, config, CASH).input.periods.Dinner!.staff.map((s) => s.name);
     expect(names).toContain('Sam (e-sam1)');
     expect(names).toContain('Sam (e-sam2)');
+  });
+});
+
+describe('buildTipoutInputs with tips from Toast shifts (default)', () => {
+  const shiftConfig = TipoutConfigSchema.parse({ ...config, cardTipSource: 'time_entries' });
+  const tipped = (): DayData => {
+    const day = baseDay();
+    day.timeEntries = [
+      entry('e-mara', 'j-bar', at('10:30'), at('18:00'), { nonCashTips: 100, nonCashGratuityServiceCharges: 12 }), // 5h lunch, 2h dinner
+      entry('e-devon', 'j-srv', at('11:00'), at('15:00'), { nonCashTips: 40 }),
+      entry('e-devon', 'j-srv', at('16:00'), at('00:30', true), {
+        nonCashTips: 60.5,
+        breaks: [{ paid: false, inDate: at('19:00'), outDate: at('19:30') }],
+      }),
+      entry('e-priya', 'j-host', at('17:00'), at('21:00')),
+      entry('e-luis', 'j-chef', at('09:00'), at('22:00')),
+    ];
+    return day;
+  };
+
+  it("uses the tips Toast credited to each shift, splitting a shift that crosses 4:00 by time worked", () => {
+    const result = buildTipoutInputs(tipped(), ref, shiftConfig, CASH);
+    // Mara's shift counts from 10:30, so it's 5.5h before 16:00 and 2h after: $100 -> 73.33 / 26.67.
+    expect(result.input.periods.Lunch).toMatchObject({ pool_card_tips: 40 + 73.33, auto_gratuity: 8.8 });
+    expect(result.input.periods.Dinner).toMatchObject({ pool_card_tips: 60.5 + 26.67, auto_gratuity: 3.2 });
+    expect(result.details.tips.source).toBe('time_entries');
+    expect(result.details.tips.spanningBothPeriods.count).toBe(1);
+  });
+
+  it('flags when shift tips and check tips disagree, but still uses the shift figures', () => {
+    const result = buildTipoutInputs(tipped(), ref, shiftConfig, CASH);
+    expect(result.ready).toBe(true);
+    // The test checks carry $95 of card tips; the shifts carry $200.50.
+    expect(result.details.tips.cardTipsOnChecks).toEqual({ Lunch: 32.5, Dinner: 62.5 });
+    expect(result.issues).toContainEqual({ severity: 'check', message: expect.stringMatching(/shifts total \$200\.50, but card tips on the day's checks total \$95\.00/) });
+  });
+
+  it("counts tips from shifts in jobs that aren't in the tip-out (e.g. a manager who took a table)", () => {
+    const day = tipped();
+    day.timeEntries.push(entry('e-sam1', 'j-som', at('18:00'), at('20:00'), { nonCashTips: 30 }));
+    const withIgnored = TipoutConfigSchema.parse({ ...shiftConfig, roles: { ...shiftConfig.roles, Sommelier: 'ignore' } });
+    const result = buildTipoutInputs(day, ref, withIgnored, CASH);
+    expect(result.input.periods.Dinner!.pool_card_tips).toBe(60.5 + 26.67 + 30);
+    expect(result.input.periods.Dinner!.staff.map((s) => s.name)).not.toContain('Sam');
   });
 });
 

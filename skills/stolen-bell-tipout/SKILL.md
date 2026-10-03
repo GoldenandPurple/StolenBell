@@ -51,10 +51,10 @@ A person who works both periods gets their Lunch and Dinner amounts summed.
 Call the Toast MCP server's **`get_tipout_inputs`** tool with the business date
 (`date`, YYYY-MM-DD) and the two counts as `cashLunch` and `cashDinner`.
 It does the bucketing for you:
-- **Card tips and auto-gratuity** go to the period the check was open in. A check open across
-  both (e.g. opened 3:30, paid 4:30) is shared between Lunch and Dinner in proportion to the time
-  it was open in each, as Toast does. `details.checksSpanningBothPeriods` shows how many checks
-  were shared and how much went each way.
+- **Card tips and auto-gratuity** are the amounts Toast credited to each shift, which already
+  include Toast's own adjustments (as on its Tip Summary). A shift that crosses 4:00 is split by
+  time worked on each side. `details.tips` shows these alongside the same tips rebuilt from the
+  day's checks; if the two differ, a `check` issue says so. Show it to the GM.
 - **Sales** go to the period the order was opened in. `gross_food_sales` is the
   food-category items before discounts, as Toast reports gross sales; `net_sales` is all
   categories after discounts. Both are pre-tax.

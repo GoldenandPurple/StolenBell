@@ -50,9 +50,17 @@ export interface TipoutInputs {
   input: TipoutInputDocument;
   details: {
     timeZone: string;
-    cardTipSplit: string;
-    /** Checks whose card tips/auto-gratuity were shared between Lunch and Dinner, and how much went to each. */
-    checksSpanningBothPeriods: { count: number; toLunch: number; toDinner: number };
+    /** Where card tips and auto-gratuity came from, and how they compare with the other source. */
+    tips: {
+      source: string;
+      /** Shifts (or checks, for check-based sources) whose tips were shared between Lunch and Dinner. */
+      spanningBothPeriods: { count: number; toLunch: number; toDinner: number };
+      cardTipsOnShifts: Record<Period, number>;
+      cardTipsOnChecks: Record<Period, number>;
+      autoGratuityOnShifts: Record<Period, number>;
+      autoGratuityOnChecks: Record<Period, number>;
+      cashGratuityOnShifts: number;
+    };
     periodWindows: Record<Period, string>;
     perPeriod: Record<Period, PeriodDetails>;
     jobMapping: Record<string, string>;
@@ -170,8 +178,11 @@ export function buildTipoutInputs(day: DayData, ref: Reference, config: TipoutCo
     check(`Food categories not found in Toast and ignored: ${missingFood.join(', ')}.`);
   }
 
-  // Orders: sales go to the period the order was opened in. Card tips and auto-gratuity are
-  // shared between periods per config.cardTipSplit (by default, by how long each check was open in each).
+  // Orders: sales go to the period the order was opened in. Card tips and auto-gratuity are also
+  // rebuilt from the checks here; they're used when cardTipSource is check-based, and otherwise only
+  // to cross-check Toast's per-shift figures.
+  const useShifts = config.cardTipSource === 'time_entries';
+  const checkMethod = useShifts ? 'check_time' : config.cardTipSource;
   const splitChecks = { count: 0, lunchCents: 0, dinnerCents: 0 };
   let earlyTipCents = 0;
   let undatedTipCents = 0;
@@ -214,11 +225,11 @@ export function buildTipoutInputs(day: DayData, ref: Reference, config: TipoutCo
       const paidTimes = payments.map((payment) => parseInstant(payment.paidDate)).filter((t): t is number => t !== undefined);
       const checkStart = parseInstant(c.openedDate) ?? opened;
       const checkEnd = parseInstant(c.closedDate) ?? (paidTimes.length ? Math.max(...paidTimes) : undefined) ?? checkStart;
-      // How this check's card tips and auto-gratuity are shared between Lunch and Dinner (see cardTipSplit).
+      // How this check's card tips and auto-gratuity are shared between Lunch and Dinner (see cardTipSource).
       const shares =
-        config.cardTipSplit === 'payment'
+        checkMethod === 'payment'
           ? undefined
-          : (config.cardTipSplit === 'items' ? itemShares(c.selections ?? [], checkStart, periodOf) : undefined) ??
+          : (checkMethod === 'check_items' ? itemShares(c.selections ?? [], checkStart, periodOf) : undefined) ??
             timeShares(checkStart, checkEnd, dinnerStart, periodOf);
       const paidAt = (payment: (typeof payments)[number]) => parseInstant(payment.paidDate) ?? parseInstant(c.closedDate) ?? opened;
 
@@ -266,15 +277,21 @@ export function buildTipoutInputs(day: DayData, ref: Reference, config: TipoutCo
       }
     }
   }
-  if (undatedTipCents) stop(`${money(undatedTipCents)} of tips have no payment time, so they can't be put in Lunch or Dinner.`);
+  if (undatedTipCents && !useShifts) stop(`${money(undatedTipCents)} of tips have no payment time, so they can't be put in Lunch or Dinner.`);
   if (undatedOrders) stop(`${undatedOrders} order(s) with sales have no opened time, so their sales can't be put in Lunch or Dinner.`);
-  if (earlyTipCents) check(`${money(earlyTipCents)} of card tips were on checks closed before ${config.periods.lunchStart}; they are counted in Lunch.`);
+  if (earlyTipCents && !useShifts) check(`${money(earlyTipCents)} of card tips were on checks closed before ${config.periods.lunchStart}; they are counted in Lunch.`);
 
   // Time entries: hours split at the period boundaries, minus unpaid breaks.
   const roleMap = new Map(Object.entries(config.roles).map(([job, role]) => [normalize(job), role]));
   const jobMapping: Record<string, string> = {};
   const unmapped = new Set<string>();
   const windows: Record<Period, [number, number]> = { Lunch: [lunchStart, dinnerStart], Dinner: [dinnerStart, Infinity] };
+
+  // Card tips and auto-gratuity as Toast credited them to each shift (its own allocation).
+  const shiftTips: Record<Period, { card: number; gratuity: number }> = { Lunch: { card: 0, gratuity: 0 }, Dinner: { card: 0, gratuity: 0 } };
+  const splitShifts = { count: 0, lunchCents: 0, dinnerCents: 0 };
+  let cashGratuityOnShifts = 0;
+  let undatedShiftTipCents = 0;
 
   for (const entry of day.timeEntries) {
     if (entry.deleted) continue;
@@ -283,15 +300,58 @@ export function buildTipoutInputs(day: DayData, ref: Reference, config: TipoutCo
     const job = jobTitle(ref, entry);
     const role = roleMap.get(normalize(job));
     jobMapping[job] = role ?? 'UNMAPPED';
+    const name = staffName(ref, guid);
+    const clockIn = parseInstant(entry.inDate);
+    const clockOut = parseInstant(entry.outDate);
+
+    let unfinishedBreak = false;
+    const unpaidBreaks: [number, number][] = [];
+    for (const breakEntry of entry.breaks ?? []) {
+      if (breakEntry.paid || breakEntry.missed) continue;
+      const start = parseInstant(breakEntry.inDate);
+      const end = parseInstant(breakEntry.outDate);
+      if (start === undefined || end === undefined) {
+        unfinishedBreak = true;
+        continue;
+      }
+      if (clockIn !== undefined && clockOut !== undefined) unpaidBreaks.push([Math.max(start, clockIn), Math.min(end, clockOut)]);
+    }
+    const workedIn = (from: number, to: number) =>
+      clockIn === undefined || clockOut === undefined
+        ? 0
+        : overlapMs(clockIn, clockOut, from, to) -
+          unpaidBreaks.reduce((sum, [start, end]) => sum + (end > start ? overlapMs(start, end, from, to) : 0), 0);
+
+    // Every shift's tips belong in the pool, whatever the job, so this comes before the role checks.
+    const card = cents(entry.nonCashTips);
+    const gratuity = cents(entry.nonCashGratuityServiceCharges);
+    cashGratuityOnShifts += cents(entry.cashGratuityServiceCharges);
+    if (card || gratuity) {
+      const worked = workedIn(-Infinity, Infinity);
+      const shares: Shares | undefined =
+        worked > 0
+          ? { Lunch: workedIn(-Infinity, dinnerStart), Dinner: workedIn(dinnerStart, Infinity) }
+          : clockIn !== undefined
+            ? oneHot(periodOf(clockIn))
+            : undefined;
+      if (!shares) undatedShiftTipCents += card + gratuity;
+      else {
+        for (const [period, amount] of splitCents(card, shares)) shiftTips[period].card += amount;
+        for (const [period, amount] of splitCents(gratuity, shares)) shiftTips[period].gratuity += amount;
+        if (shares.Lunch > 0 && shares.Dinner > 0) {
+          const [[, lunch], [, dinner]] = splitCents(card + gratuity, shares);
+          splitShifts.count += 1;
+          splitShifts.lunchCents += lunch;
+          splitShifts.dinnerCents += dinner;
+        }
+      }
+    }
+
     if (!role) {
       unmapped.add(job);
       continue;
     }
     if (role === 'ignore') continue;
-
-    const name = staffName(ref, guid);
-    const clockIn = parseInstant(entry.inDate);
-    const clockOut = parseInstant(entry.outDate);
     if (clockIn === undefined) {
       stop(`${name} (${job}) has a time entry with no clock-in time.`);
       continue;
@@ -300,21 +360,7 @@ export function buildTipoutInputs(day: DayData, ref: Reference, config: TipoutCo
       stop(`${name} (${job}) is still clocked in (since ${wallClock(clockIn, timeZone)}). Clock them out in Toast first.`);
       continue;
     }
-
-    const unpaidBreaks: [number, number][] = [];
-    for (const breakEntry of entry.breaks ?? []) {
-      if (breakEntry.paid || breakEntry.missed) continue;
-      const start = parseInstant(breakEntry.inDate);
-      const end = parseInstant(breakEntry.outDate);
-      if (start === undefined || end === undefined) {
-        check(`${name} (${job}) has an unfinished break; it was not deducted.`);
-        continue;
-      }
-      unpaidBreaks.push([Math.max(start, clockIn), Math.min(end, clockOut)]);
-    }
-    const workedIn = (from: number, to: number) =>
-      overlapMs(clockIn, clockOut, from, to) -
-      unpaidBreaks.reduce((sum, [start, end]) => sum + (end > start ? overlapMs(start, end, from, to) : 0), 0);
+    if (unfinishedBreak) check(`${name} (${job}) has an unfinished break; it was not deducted.`);
 
     for (const period of PERIODS) {
       const ms = workedIn(...windows[period]);
@@ -337,6 +383,26 @@ export function buildTipoutInputs(day: DayData, ref: Reference, config: TipoutCo
   }
   for (const job of unmapped) {
     stop(`Toast job "${job}" isn't mapped to a tip-out role. Add it under roles in the tip-out config (or map it to "ignore").`);
+  }
+
+  const checkTips: Record<Period, { card: number; gratuity: number }> = {
+    Lunch: { card: acc.Lunch.cardTipCents, gratuity: acc.Lunch.gratuityCents },
+    Dinner: { card: acc.Dinner.cardTipCents, gratuity: acc.Dinner.gratuityCents },
+  };
+  if (useShifts) {
+    for (const period of PERIODS) {
+      acc[period].cardTipCents = shiftTips[period].card;
+      acc[period].gratuityCents = shiftTips[period].gratuity;
+    }
+    if (undatedShiftTipCents) stop(`${money(undatedShiftTipCents)} of tips are on shifts with no clock-in time, so they can't be put in Lunch or Dinner.`);
+    const onShifts = shiftTips.Lunch.card + shiftTips.Dinner.card + undatedShiftTipCents;
+    const onChecks = checkTips.Lunch.card + checkTips.Dinner.card;
+    if (Math.abs(onShifts - onChecks) > 100) {
+      check(
+        `Card tips on Toast shifts total ${money(onShifts)}, but card tips on the day's checks total ${money(onChecks)}. ` +
+          `The tip-out uses the shift figures (Toast's allocation); a gap usually means a tip was adjusted after the shift closed, or someone took payments without clocking in.`,
+      );
+    }
   }
 
   // The engine keys payouts by name, so two employees with the same name get their ID appended.
@@ -396,11 +462,18 @@ export function buildTipoutInputs(day: DayData, ref: Reference, config: TipoutCo
     input: { business_date: businessDate, periods },
     details: {
       timeZone,
-      cardTipSplit: config.cardTipSplit,
-      checksSpanningBothPeriods: {
-        count: splitChecks.count,
-        toLunch: dollars(splitChecks.lunchCents),
-        toDinner: dollars(splitChecks.dinnerCents),
+      tips: {
+        source: config.cardTipSource,
+        spanningBothPeriods: {
+          count: (useShifts ? splitShifts : splitChecks).count,
+          toLunch: dollars((useShifts ? splitShifts : splitChecks).lunchCents),
+          toDinner: dollars((useShifts ? splitShifts : splitChecks).dinnerCents),
+        },
+        cardTipsOnShifts: { Lunch: dollars(shiftTips.Lunch.card), Dinner: dollars(shiftTips.Dinner.card) },
+        cardTipsOnChecks: { Lunch: dollars(checkTips.Lunch.card), Dinner: dollars(checkTips.Dinner.card) },
+        autoGratuityOnShifts: { Lunch: dollars(shiftTips.Lunch.gratuity), Dinner: dollars(shiftTips.Dinner.gratuity) },
+        autoGratuityOnChecks: { Lunch: dollars(checkTips.Lunch.gratuity), Dinner: dollars(checkTips.Dinner.gratuity) },
+        cashGratuityOnShifts: dollars(cashGratuityOnShifts),
       },
       periodWindows: { Lunch: `${clock(lunchStart)}–${clock(dinnerStart)}`, Dinner: `${clock(dinnerStart)}–close` },
       perPeriod,
