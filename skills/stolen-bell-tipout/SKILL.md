@@ -23,8 +23,10 @@ Two periods each day, split by clock time:
 - **Dinner** 16:00–close
 
 For each period:
-- **Pool** = card tips collected in that period. Cash is not pooled unless the GM
-  enters a cash figure for the period (it normally stays off).
+- **Pool** = card tips + auto-gratuity collected in that period (both from Toast), plus the
+  period's cash tips. Cash is pooled but not captured by Toast: the till is counted twice,
+  at the 4:00 changeover (Lunch) and at close (Dinner). The GM gives the skill both counts
+  (cash is always a manual entry); everything else comes from Toast.
 - **Kitchen** = 10% of gross food sales → paid as a single lump; the Chef divides it.
 - **Support** = % of net sales, split across the support staff (Host, Barback) by hours:
   **2.25%** if both a Host and a Barback worked, **1.5%** if only one support role worked,
@@ -39,30 +41,33 @@ A person who works both periods gets their Lunch and Dinner amounts summed.
 
 ## Workflow
 
-### 1. Establish the day and any cash
+### 1. Establish the day and the cash counts
 - Confirm the **business date** (default to yesterday if the GM doesn't say).
-- Ask whether any **cash** is being added to either period's pool. Default: none.
+- Ask for the **cash tip count for each period**: the till count at the 4:00 changeover
+  (Lunch) and at close (Dinner). Toast doesn't have these. Don't assume zero; if there
+  genuinely was no cash, the GM says 0.
 
 ### 2. Pull from Toast (read-only)
 Call the Toast MCP server's **`get_tipout_inputs`** tool with the business date
-(`date`, YYYY-MM-DD), plus `cashLunch` / `cashDinner` only if the GM gave a cash figure.
+(`date`, YYYY-MM-DD) and the two counts as `cashLunch` and `cashDinner`.
 It does the bucketing for you:
-- **Card tips** go to Lunch or Dinner by when each payment was made. Cash tips are left out
-  (they're reported under `details` and as a `check` issue so the GM can decide).
+- **Card tips and auto-gratuity** go to Lunch or Dinner by when they were paid.
 - **Sales** go to the period the order was opened in. `gross_food_sales` is the
   food-category items (pre-tax, after discounts); `net_sales` is all categories.
+  `cash_sales` (cash payments, excluding tips) is only for the Cash Out form.
 - **Hours** come from clock-in/clock-out, split at the Lunch/Dinner boundary, with unpaid
   breaks removed. Time before Lunch starts counts toward neither period. Toast jobs are
   mapped to `Bartender`, `Server`, `Host`, `Barback` or `Kitchen` by `config/tipout.yaml`
   in the MCP server repo.
 
 Read the result:
-- **`ready: false`** means at least one issue has severity `stop` (open shift, a Toast job
-  with no role mapping, tips or orders without a time, sales with $0 card tips, no food
-  category found). **Stop.** Show the GM those issues and wait. Don't estimate around them.
+- **`ready: false`** means at least one issue has severity `stop` (a missing cash count,
+  an open shift, a Toast job with no role mapping, tips or orders without a time, sales
+  with no tips, no food category found). **Stop.** Show the GM those issues and wait.
+  Don't estimate around them.
 - Issues with severity `check` don't block. Show them to the GM alongside the result.
-- `details` shows card tips by payment type, cash tips seen in Toast, and sales by category
-  per period. Use it to answer "where did this number come from?"
+- `details` shows card tips by payment type, auto-gratuity, cash sales and sales by
+  category per period. Use it to answer "where did this number come from?"
 
 ### 3. Save the input
 `input` is already in the exact shape of `examples/dinner_example.json`. Write it unchanged
@@ -73,20 +78,29 @@ to the scratchpad (e.g. `tipout-YYYY-MM-DD.json`).
 python3 scripts/tipout.py <input.json>          # readable report
 python3 scripts/tipout.py <input.json> --json    # structured, for building the sheet
 ```
-The engine reconciles to the cent: every dollar of the card pool lands on a named
-person, and kitchen comes out of sales as its own lump.
+The engine reconciles to the cent: every dollar of the pool (card tips, auto-gratuity and
+cash) lands on a named person or the kitchen lump.
 
 ### 5. Present for approval
 - Show the per-person day totals, the kitchen lump, and **every flag** the engine raised
   (due back, a $0 pool against real sales, an unmapped role, no bar/servers on a period).
-- Build a per-person **payout sheet** (xlsx) from the `--json` output for the GM to keep.
+- Fill the **Cash Out form** (`forms/CashOut_Form.xlsx`, one sheet per service period) with:
+  ```
+  python3 scripts/fill_cashout.py <input.json> --out CashOut_YYYY-MM-DD.xlsx --completed-by "<GM name>"
+  ```
+  This fills the yellow cells so Steph gets the same worksheet she uses now, with the form's
+  own formulas doing the arithmetic. It first checks that those formulas will land on the
+  engine's figures. If it exits with `problems` (two people in the same support role, more
+  staff than the form has rows, or a due back), **no form is written**. Show the problems and
+  give the GM the engine's payout table instead; don't fill the form by hand to force it.
+  The "Hourly rate (ref)" column is left blank.
 - State plainly that this is a draft to review and that **no one is paid and nothing is
   written back** until the GM acts on it outside this skill.
 
 ## Guardrails
 - **Read-only** against Toast. The Toast token should be scoped read-only so the skill
   physically cannot write; never call a write/update endpoint even if one is available.
-- **Stop and ask** rather than guess if: a clock-out is missing (open shift), a Toast job
+- **Stop and ask** rather than guess if: a cash count is missing, a clock-out is missing (open shift), a Toast job
   doesn't map to a known role, food vs net sales can't be cleanly separated, or any period
   has sales but no tips.
 - **Never** auto-push results to Rise, Xero, or Toast. The output is a sheet; a human pays.

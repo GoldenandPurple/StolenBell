@@ -49,7 +49,7 @@ describe('MCP server (demo mode)', () => {
   });
 
   it('produces tip-out inputs the skill engine accepts, and the engine reconciles them', async () => {
-    const { data } = await call('get_tipout_inputs', { date: '2026-09-26' });
+    const { data } = await call('get_tipout_inputs', { date: '2026-09-26', cashLunch: 42, cashDinner: 118.5 });
     expect(data.ready).toBe(true);
     expect(Object.keys(data.input.periods)).toEqual(['Lunch', 'Dinner']);
     const dinnerRoles = new Set(data.input.periods.Dinner.staff.map((s: { role: string }) => s.role));
@@ -65,7 +65,11 @@ describe('MCP server (demo mode)', () => {
     const out = JSON.parse(execFileSync('python3', ['skills/stolen-bell-tipout/scripts/tipout.py', file, '--json'], { encoding: 'utf8' }));
     const cents = (v: string) => Math.round(Number(v) * 100);
     const paid = Object.values(out.per_person as Record<string, string>).reduce((sum, v) => sum + cents(v), 0) + cents(out.kitchen_lump_total);
-    const pool = Math.round((data.input.periods.Lunch.pool_card_tips + data.input.periods.Dinner.pool_card_tips) * 100);
+    const pool = (['Lunch', 'Dinner'] as const).reduce((sum, name) => {
+      const p = data.input.periods[name];
+      return sum + Math.round((p.pool_card_tips + p.auto_gratuity + p.cash_tips_manual) * 100);
+    }, 0);
+    expect(data.input.periods.Dinner.cash_tips_manual).toBe(118.5);
     expect(out.periods.every((p: { flags: string[] }) => p.flags.length === 0)).toBe(true);
     expect(paid).toBe(pool);
   });

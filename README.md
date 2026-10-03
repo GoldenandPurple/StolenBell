@@ -52,7 +52,7 @@ Dates are Toast business dates (`YYYY-MM-DD`). A range can be up to 31 days.
 The tip-out is split between two pieces so the rules live in exactly one place:
 
 1. **This server's `get_tipout_inputs` tool** pulls the day from Toast and buckets it into Lunch and Dinner.
-2. **The [Stolen Bell tip-out skill](skills/stolen-bell-tipout/SKILL.md)** feeds that into its engine, [`scripts/tipout.py`](skills/stolen-bell-tipout/scripts/tipout.py), which applies the house rules: card-tip pool, 10% of food sales to the kitchen, 2.25% / 1.5% of net sales to Host and Barback, and the remainder to Bartenders and Servers by hours. The skill then shows the GM a draft payout sheet to approve.
+2. **The [Stolen Bell tip-out skill](skills/stolen-bell-tipout/SKILL.md)** feeds that into its engine, [`scripts/tipout.py`](skills/stolen-bell-tipout/scripts/tipout.py), which applies the house rules: a pool of card tips, auto-gratuity and the counted cash, 10% of food sales to the kitchen, 2.25% / 1.5% of net sales to Host and Barback, and the remainder to Bartenders and Servers by hours. The skill then shows the GM a draft to approve and fills Steph's Cash Out form with [`scripts/fill_cashout.py`](skills/stolen-bell-tipout/scripts/fill_cashout.py). That script won't write a form whose formulas would disagree with the engine.
 
 To change the **rules**, edit `tipout.py` (and its tests). To change how **Toast data is mapped**, edit [`config/tipout.yaml`](config/tipout.yaml):
 
@@ -65,12 +65,15 @@ To change the **rules**, edit `tipout.py` (and its tests). To change how **Toast
 
 How `get_tipout_inputs` buckets the day:
 
-- **Card tips**: every non-cash payment's tip, in the period it was paid (payment time, falling back to check close time). Cash tips aren't pooled unless the GM passes `cashLunch` / `cashDinner`. The amount Toast recorded is shown for reference.
+- **Card tips**: every non-cash payment's tip, in the period it was paid (payment time, falling back to check close time).
+- **Auto-gratuity**: gratuity service charges, in the period the check was paid.
+- **Cash tips**: not in Toast. The GM's till counts (4:00 changeover and close) are passed as `cashLunch` / `cashDinner`; until both are given, the result isn't ready.
+- **Cash sales**: cash payments excluding tips, for the Cash Out form only.
 - **Sales**: non-voided items on non-voided checks, in the period the order was opened. Food is the net price of items in `foodCategories`; net sales is every category. Both are pre-tax and after discounts.
 - **Hours**: from clock-in to clock-out, split at the period boundary, minus unpaid breaks. Several time entries for the same person and role are combined.
-- **It stops (`ready: false`)** on anything a person needs to resolve: an open shift, an unmapped job, tips or orders without a time, a period with sales but $0 card tips, or no matching food category. Smaller things, such as hours before 11:00 or cash tips seen in Toast, come back as `check` issues to show the GM.
+- **It stops (`ready: false`)** on anything a person needs to resolve: a missing cash count, an open shift, an unmapped job, tips or orders without a time, a period with sales but $0 card tips, or no matching food category. Smaller things, such as hours before 11:00, come back as `check` issues to show the GM.
 
-The skill's engine is tested with `python3 -m unittest discover -s skills/stolen-bell-tipout/tests`; `npm test` runs it alongside the server tests, including a test that runs the engine on the server's own output and checks every dollar of the pool is paid out.
+The skill's scripts need Python 3 and `openpyxl` (`formulas` too, to run the form test that evaluates the spreadsheet's own formulas). They're tested with `python3 -m unittest discover -s skills/stolen-bell-tipout/tests`; `npm test` runs it alongside the server tests, including a test that runs the engine on the server's own output and checks every dollar of the pool is paid out.
 
 ## Live mode (your Toast account)
 
@@ -112,6 +115,8 @@ config/tipout.yaml    Toast job / category / period mapping for the tip-out
 skills/stolen-bell-tipout/
   SKILL.md            the GM-facing tip-out workflow
   scripts/tipout.py   the tip-out rules (single source of truth)
+  scripts/fill_cashout.py  fills the Cash Out form, checking it against the engine
+  forms/              Steph's Cash Out form
   tests/              engine tests
 test/                 vitest suites
 ```

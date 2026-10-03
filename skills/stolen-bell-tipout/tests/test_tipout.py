@@ -43,6 +43,13 @@ class Rules(unittest.TestCase):
         self.assertEqual((both.support_total, one.support_total, none.support_total),
                          (D("22.50"), D("15.00"), D("0.00")))
 
+    def test_auto_gratuity_and_cash_are_pooled(self):
+        p = period([{"name": "S", "role": "Server", "hours": 4}], card=100, cash=25)
+        p["auto_gratuity"] = 40
+        r = compute_period("Dinner", p)
+        self.assertEqual(r.pool, D("165.00"))
+        self.assertEqual(r.tipped_payouts, {"S": D("165.00")})
+
     def test_due_back_when_pool_cannot_cover_obligations(self):
         r = compute_period("Lunch", period([{"name": "S", "role": "Server", "hours": 5}], card=50, food=1000))
         self.assertEqual(r.due_back, D("50.00"))

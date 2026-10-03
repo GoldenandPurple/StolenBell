@@ -34,6 +34,8 @@ const ref: Reference = {
   revenueCenters: new Map(),
 };
 
+const CASH = { Lunch: 0, Dinner: 0 };
+
 const config = TipoutConfigSchema.parse({
   roles: { Bartender: 'Bartender', Server: 'Server', Host: 'Host', Chef: 'Kitchen' },
 });
@@ -84,14 +86,27 @@ const baseDay = (): DayData => ({
 
 describe('buildTipoutInputs', () => {
   it('splits sales by order time and card tips by payment time', () => {
-    const result = buildTipoutInputs(baseDay(), ref, config);
+    const result = buildTipoutInputs(baseDay(), ref, config, CASH);
     expect(result.input.periods.Lunch).toMatchObject({ pool_card_tips: 25, gross_food_sales: 150, net_sales: 170 });
-    expect(result.input.periods.Dinner).toMatchObject({ pool_card_tips: 70, gross_food_sales: 240, net_sales: 330, cash_tips_manual: null });
+    expect(result.input.periods.Dinner).toMatchObject({ pool_card_tips: 70, gross_food_sales: 240, net_sales: 330, cash_tips_manual: 0 });
     expect(result.details.perPeriod.Dinner.cashTipsRecordedInToast).toBe(9);
   });
 
+  it('puts auto-gratuity in the period the check was paid, and totals cash sales', () => {
+    const day = baseDay();
+    const party = order(at('15:20'), at('16:05'), 300, 0, 0);
+    party.checks![0]!.appliedServiceCharges = [{ name: 'Auto grat', chargeAmount: 54, gratuity: true }, { name: 'Corkage', chargeAmount: 20, gratuity: false }];
+    day.orders.push(party);
+    const { Lunch, Dinner } = buildTipoutInputs(day, ref, config, CASH).input.periods;
+    expect(Lunch!.auto_gratuity).toBe(0);
+    expect(Dinner!.auto_gratuity).toBe(54);
+    expect(Lunch!.net_sales).toBe(470); // the party's sales stay with the period it was opened in
+    day.orders[3]!.checks![0]!.payments![0]!.amount = 52.5;
+    expect(buildTipoutInputs(day, ref, config, CASH).input.periods.Dinner!.cash_sales).toBe(52.5);
+  });
+
   it('splits hours at 16:00, ignores time before 11:00, removes unpaid breaks only, and merges same-role entries', () => {
-    const { Lunch, Dinner } = buildTipoutInputs(baseDay(), ref, config).input.periods;
+    const { Lunch, Dinner } = buildTipoutInputs(baseDay(), ref, config, CASH).input.periods;
     expect(Lunch!.staff).toEqual([
       { name: 'Mara', role: 'Bartender', hours: 5 },
       { name: 'Luis', role: 'Kitchen', hours: 5 },
@@ -105,9 +120,17 @@ describe('buildTipoutInputs', () => {
     ]);
   });
 
-  it('is ready on a clean day and passes GM cash through', () => {
-    const result = buildTipoutInputs(baseDay(), ref, config, { Dinner: 120 });
+  it('needs both till counts before it is ready', () => {
+    const missing = buildTipoutInputs(baseDay(), ref, config, { Dinner: 120 });
+    expect(missing.ready).toBe(false);
+    expect(missing.issues).toContainEqual({ severity: 'stop', message: expect.stringMatching(/^Enter the Lunch cash tip count \(till count at the 4:00 changeover\)/) });
+    expect(missing.issues.map((i) => i.message).join()).not.toMatch(/Enter the Dinner/);
+  });
+
+  it('is ready on a clean day and passes the till counts through', () => {
+    const result = buildTipoutInputs(baseDay(), ref, config, { Lunch: 35.5, Dinner: 120 });
     expect(result.ready).toBe(true);
+    expect(result.input.periods.Lunch!.cash_tips_manual).toBe(35.5);
     expect(result.input.periods.Dinner!.cash_tips_manual).toBe(120);
     expect(result.issues.filter((i) => i.severity === 'stop')).toEqual([]);
     expect(result.issues.map((i) => i.message).join()).toMatch(/Mara \(Bartender\) worked 0.50 h before 11:00/);
@@ -116,7 +139,7 @@ describe('buildTipoutInputs', () => {
   it('stops on an open shift', () => {
     const day = baseDay();
     day.timeEntries.push(entry('e-priya', 'j-host', at('11:00'), null));
-    const result = buildTipoutInputs(day, ref, config);
+    const result = buildTipoutInputs(day, ref, config, CASH);
     expect(result.ready).toBe(false);
     expect(result.issues).toContainEqual({ severity: 'stop', message: expect.stringMatching(/Priya \(Host\) is still clocked in/) });
   });
@@ -124,28 +147,28 @@ describe('buildTipoutInputs', () => {
   it('stops on a job with no role mapping, and lets "ignore" through', () => {
     const day = baseDay();
     day.timeEntries.push(entry('e-sam1', 'j-som', at('17:00'), at('22:00')));
-    expect(buildTipoutInputs(day, ref, config).issues).toContainEqual({ severity: 'stop', message: expect.stringMatching(/"Sommelier" isn't mapped/) });
+    expect(buildTipoutInputs(day, ref, config, CASH).issues).toContainEqual({ severity: 'stop', message: expect.stringMatching(/"Sommelier" isn't mapped/) });
     const ignoring = TipoutConfigSchema.parse({ ...config, roles: { ...config.roles, Sommelier: 'ignore' } });
-    expect(buildTipoutInputs(day, ref, ignoring).ready).toBe(true);
+    expect(buildTipoutInputs(day, ref, ignoring, CASH).ready).toBe(true);
   });
 
   it('stops when a period has sales but no card tips', () => {
     const day = baseDay();
     day.orders = day.orders.filter((o) => !o.openedDate!.startsWith(at('12:00').slice(0, 16)));
     day.orders.push(order(at('13:00'), at('13:30'), 80, 0, 0));
-    const result = buildTipoutInputs(day, ref, config);
+    const result = buildTipoutInputs(day, ref, config, CASH);
     expect(result.issues).toContainEqual({ severity: 'stop', message: expect.stringMatching(/^Lunch has .* \$0 in card tips/) });
   });
 
   it('stops when no configured food category exists in Toast', () => {
     const wrong = TipoutConfigSchema.parse({ ...config, foodCategories: ['Kitchen Food'] });
-    expect(buildTipoutInputs(baseDay(), ref, wrong).ready).toBe(false);
+    expect(buildTipoutInputs(baseDay(), ref, wrong, CASH).ready).toBe(false);
   });
 
   it('gives two different people with the same name distinct names', () => {
     const day = baseDay();
     day.timeEntries.push(entry('e-sam1', 'j-srv', at('17:00'), at('22:00')), entry('e-sam2', 'j-srv', at('17:00'), at('21:00')));
-    const names = buildTipoutInputs(day, ref, config).input.periods.Dinner!.staff.map((s) => s.name);
+    const names = buildTipoutInputs(day, ref, config, CASH).input.periods.Dinner!.staff.map((s) => s.name);
     expect(names).toContain('Sam (e-sam1)');
     expect(names).toContain('Sam (e-sam2)');
   });

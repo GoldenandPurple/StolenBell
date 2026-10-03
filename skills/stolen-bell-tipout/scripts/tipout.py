@@ -8,7 +8,7 @@ breakdown. All sales/tip data is fetched upstream by the skill (Toast MCP);
 this module does only the math so the rules live in one auditable place.
 
 Rules (per service period, Lunch 11:00-16:00 and Dinner 16:00-close):
-  pool       = card tips in the period (+ optional manually entered cash)
+  pool       = card tips + auto-gratuity in the period + the period's cash till count
   kitchen    = 10% of gross food sales       -> single lump, Chef splits later
   support    = % of net sales, split across support staff (Host/Barback) by hours
                  2.25% if BOTH Host and Barback worked
@@ -90,7 +90,8 @@ def compute_period(period: str, data: dict) -> PeriodResult:
     card = _money(data.get("pool_card_tips", 0))
     cash = data.get("cash_tips_manual")
     cash = _money(cash) if cash not in (None, "") else Decimal("0.00")
-    pool = card + cash
+    auto_grat = _money(data.get("auto_gratuity", 0))
+    pool = card + cash + auto_grat
 
     gross_food = _money(data.get("gross_food_sales", 0))
     net_sales = _money(data.get("net_sales", 0))
@@ -158,7 +159,7 @@ def format_report(day: dict) -> str:
     for r in day["periods"]:
         lines += [
             "", f"[{r.period}]",
-            f"  Pool (card + cash)      ${r.pool:>10,.2f}",
+            f"  Pool (card+grat+cash)   ${r.pool:>10,.2f}",
             f"  Kitchen (10% food)      ${r.kitchen:>10,.2f}   -> lump, Chef splits",
             f"  {f'Support ({(r.support_rate * 100).normalize():f}% net)':<24}${r.support_total:>10,.2f}",
         ]

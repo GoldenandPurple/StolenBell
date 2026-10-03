@@ -162,15 +162,16 @@ export function createServer({ config, repo, loadTipoutConfig }: ServerDeps): Mc
     {
       title: 'Tip-out inputs',
       description:
-        'Pulls everything the Stolen Bell tip-out needs for one business day, split into Lunch and Dinner: card tips by when they were paid, ' +
-        'food and net sales by when the order was opened, and each person\'s hours by tip-out role, split at the period boundary with unpaid breaks removed. ' +
+        'Pulls everything the Stolen Bell tip-out needs for one business day, split into Lunch and Dinner: card tips and auto-gratuity by when they were paid, ' +
+        'food and net sales by when the order was opened, cash sales for the Cash Out form, and each person\'s hours by tip-out role, split at the period boundary with unpaid breaks removed. ' +
+        'Cash tips are not in Toast: pass the GM\'s till counts (4:00 changeover for Lunch, close for Dinner) as cashLunch and cashDinner. ' +
         '`input` is the exact document the tip-out engine (skills/stolen-bell-tipout/scripts/tipout.py) reads. ' +
         'If `ready` is false, an issue with severity "stop" must be resolved by a person before running the engine; never estimate around it. ' +
         'This tool does not calculate payouts.',
       inputSchema: {
         date: z.string().describe('Business date, YYYY-MM-DD'),
-        cashLunch: z.number().min(0).optional().describe('Cash the GM is adding to the Lunch pool. Leave out for none.'),
-        cashDinner: z.number().min(0).optional().describe('Cash the GM is adding to the Dinner pool. Leave out for none.'),
+        cashLunch: z.number().min(0).optional().describe('Cash tips counted from the till at the 4:00 changeover (0 if none). Required before the result is ready.'),
+        cashDinner: z.number().min(0).optional().describe('Cash tips counted from the till at close (0 if none). Required before the result is ready.'),
       },
       annotations: readOnly,
     },

@@ -15,7 +15,10 @@ const PERIODS: Period[] = ['Lunch', 'Dinner'];
 
 export interface PeriodInput {
   pool_card_tips: number;
+  auto_gratuity: number;
   cash_tips_manual: number | null;
+  /** For the Cash Out form only; the engine ignores it. Cash payments excluding tips. */
+  cash_sales: number;
   gross_food_sales: number;
   net_sales: number;
   staff: { name: string; role: TipoutRole; hours: number }[];
@@ -34,6 +37,8 @@ export interface Issue {
 
 export interface PeriodDetails {
   orders: number;
+  autoGratuity: number;
+  cashSales: number;
   cardTipsByPaymentType: Record<string, number>;
   cashTipsRecordedInToast: number;
   salesByCategory: Record<string, number>;
@@ -58,6 +63,8 @@ interface Accumulator {
   netCents: number;
   foodCents: number;
   cardTipCents: number;
+  gratuityCents: number;
+  cashSalesCents: number;
   cardTipsByType: Record<string, number>;
   cashTipCents: number;
   salesByCategory: Record<string, number>;
@@ -70,6 +77,8 @@ const blank = (): Accumulator => ({
   netCents: 0,
   foodCents: 0,
   cardTipCents: 0,
+  gratuityCents: 0,
+  cashSalesCents: 0,
   cardTipsByType: {},
   cashTipCents: 0,
   salesByCategory: {},
@@ -155,16 +164,31 @@ export function buildTipoutInputs(day: DayData, ref: Reference, config: TipoutCo
     }
 
     for (const c of checks) {
-      for (const payment of c.payments ?? []) {
+      const payments = (c.payments ?? []).filter(paymentCounts);
+      const checkPaid =
+        payments.map((payment) => parseInstant(payment.paidDate)).find((instant) => instant !== undefined) ??
+        parseInstant(c.closedDate) ??
+        opened;
+      // Auto-gratuity is a service charge on the check, so it goes to the period the check was paid in.
+      const gratuity = (c.appliedServiceCharges ?? [])
+        .filter((charge) => charge.gratuity)
+        .reduce((sum, charge) => sum + cents(charge.chargeAmount), 0);
+      if (gratuity) {
+        if (checkPaid === undefined) undatedTipCents += gratuity;
+        else acc[periodOf(checkPaid)].gratuityCents += gratuity;
+      }
+
+      for (const payment of payments) {
         const tip = cents(payment.tipAmount);
-        if (tip === 0 || !paymentCounts(payment)) continue;
+        const type = (payment.type ?? 'UNKNOWN').toUpperCase();
         const paid = parseInstant(payment.paidDate) ?? parseInstant(c.closedDate) ?? opened;
+        if (type === 'CASH' && paid !== undefined) acc[periodOf(paid)].cashSalesCents += cents(payment.amount);
+        if (tip === 0) continue;
         if (paid === undefined) {
           undatedTipCents += tip;
           continue;
         }
         const bucket = acc[periodOf(paid)];
-        const type = (payment.type ?? 'UNKNOWN').toUpperCase();
         if (type === 'CASH') {
           bucket.cashTipCents += tip;
           continue;
@@ -261,21 +285,27 @@ export function buildTipoutInputs(day: DayData, ref: Reference, config: TipoutCo
   for (const period of PERIODS) {
     const bucket = acc[period];
     const cashEntered = cash[period];
-    if (bucket.orders === 0 && bucket.cardTipCents === 0 && bucket.hours.size === 0 && !cashEntered) continue;
+    if (bucket.orders === 0 && bucket.cardTipCents === 0 && bucket.gratuityCents === 0 && bucket.hours.size === 0 && !cashEntered) continue;
     periods[period] = {
       pool_card_tips: dollars(bucket.cardTipCents),
+      auto_gratuity: dollars(bucket.gratuityCents),
       cash_tips_manual: cashEntered ?? null,
+      cash_sales: dollars(bucket.cashSalesCents),
       gross_food_sales: dollars(bucket.foodCents),
       net_sales: dollars(bucket.netCents),
       staff: [...bucket.hours.values()]
         .map((slot) => ({ name: displayName(slot.guid), role: slot.role, hours: Math.round(slot.hours * 100) / 100 }))
         .sort((a, b) => a.role.localeCompare(b.role) || a.name.localeCompare(b.name)),
     };
-    if (bucket.netCents > 0 && bucket.cardTipCents === 0) {
+    if (bucket.netCents > 0 && bucket.cardTipCents === 0 && bucket.gratuityCents === 0) {
       stop(`${period} has ${money(bucket.netCents)} in sales but $0 in card tips. Check tips in Toast before running tip-out.`);
     }
-    if (bucket.cashTipCents > 0 && cashEntered === undefined) {
-      check(`${period}: Toast recorded ${money(bucket.cashTipCents)} in cash tips. Cash is only pooled if the GM enters an amount.`);
+    if (cashEntered === undefined) {
+      stop(
+        `Enter the ${period} cash tip count (${period === 'Lunch' ? 'till count at the 4:00 changeover' : 'till count at close'}). ` +
+          `Use 0 if there was none.` +
+          (bucket.cashTipCents ? ` For reference, ${money(bucket.cashTipCents)} of cash tips were entered on Toast payments.` : ''),
+      );
     }
   }
   if (!periods.Lunch && !periods.Dinner) stop('Toast returned no orders, tips or time entries for this day.');
@@ -285,6 +315,8 @@ export function buildTipoutInputs(day: DayData, ref: Reference, config: TipoutCo
   for (const period of PERIODS) {
     perPeriod[period] = {
       orders: acc[period].orders,
+      autoGratuity: dollars(acc[period].gratuityCents),
+      cashSales: dollars(acc[period].cashSalesCents),
       cardTipsByPaymentType: centsToDollars(acc[period].cardTipsByType),
       cashTipsRecordedInToast: dollars(acc[period].cashTipCents),
       salesByCategory: centsToDollars(acc[period].salesByCategory),
