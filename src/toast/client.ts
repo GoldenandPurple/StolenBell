@@ -31,6 +31,7 @@ export interface ToastDataApi {
   listOrders(businessDate: string): Promise<ToastOrder[]>;
   listSalesCategories(): Promise<ToastSalesCategory[]>;
   listRevenueCenters(): Promise<ToastRevenueCenter[]>;
+  listRestaurantServices(): Promise<{ guid: string; name?: string }[]>;
 }
 
 interface RequestOptions {
@@ -144,6 +145,11 @@ export class ToastClient implements ToastDataApi {
 
   async listRevenueCenters(): Promise<ToastRevenueCenter[]> {
     return asArray<ToastRevenueCenter>(await this.get('/config/v2/revenueCenters'));
+  }
+
+  /** Meal services configured in Toast (e.g. Lunch, Dinner), which orders reference as restaurantService. */
+  async listRestaurantServices(): Promise<{ guid: string; name?: string }[]> {
+    return asArray<{ guid: string; name?: string }>(await this.get('/config/v2/restaurantServices'));
   }
 
   private async get(path: string, options: RequestOptions = {}): Promise<unknown> {

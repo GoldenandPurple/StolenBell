@@ -175,6 +175,7 @@ function buildDay(businessDate: string): { timeEntries: ToastTimeEntry[]; orders
           numberOfGuests: guests,
           server: { guid: employee },
           revenueCenter: { guid: job === 'job-bartender' ? 'rc-bar' : 'rc-dining' },
+          restaurantService: { guid: opened < at('16:00') ? 'svc-lunch' : 'svc-dinner' },
           checks: [
             {
               openedDate: toastTime(opened),
@@ -251,5 +252,11 @@ export class DemoToastApi implements ToastDataApi {
   }
   async listRevenueCenters() {
     return REVENUE_CENTERS;
+  }
+  async listRestaurantServices() {
+    return [
+      { guid: 'svc-lunch', name: 'Lunch' },
+      { guid: 'svc-dinner', name: 'Dinner' },
+    ];
   }
 }

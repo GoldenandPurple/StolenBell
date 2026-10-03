@@ -32,6 +32,10 @@ const ref: Reference = {
     ['c-liq', 'Liquor'],
   ]),
   revenueCenters: new Map(),
+  restaurantServices: new Map([
+    ['svc-l', 'Lunch'],
+    ['svc-d', 'Dinner Service'],
+  ]),
 };
 
 const CASH = { Lunch: 0, Dinner: 0 };
@@ -117,6 +121,19 @@ describe('buildTipoutInputs', () => {
     const { Lunch, Dinner } = buildTipoutInputs(day, ref, byItems, CASH).input.periods;
     expect([Lunch!.pool_card_tips, Dinner!.pool_card_tips]).toEqual([5, 15]); // $30 vs $90 rung
     expect(Lunch!.net_sales).toBe(120); // sales still follow when the order was opened
+  });
+
+  it("can follow Toast's own Lunch/Dinner service on each order", () => {
+    const byService = TipoutConfigSchema.parse({ ...config, cardTipSource: 'restaurant_service' });
+    const day = baseDay();
+    day.orders[1]!.restaurantService = { guid: 'svc-d' }; // the 15:30-16:10 check, which Toast put in Dinner
+    const result = buildTipoutInputs(day, ref, byService, CASH);
+    // The $10 tip on the check open 15:30-16:10 goes wholly to Dinner because Toast tagged the order Dinner;
+    // untagged orders fall back to time open.
+    expect(result.input.periods.Lunch!.pool_card_tips).toBe(25);
+    expect(result.input.periods.Dinner!.pool_card_tips).toBe(70);
+    expect(result.details.tips.cardTipsByMethod.restaurant_service).toEqual({ Lunch: 25, Dinner: 70 });
+    expect(result.details.tips.cardTipsWithoutToastService).toBe(85);
   });
 
   it('keeps every cent when a tip is shared', () => {
@@ -261,6 +278,7 @@ describe('buildTipoutInputs with tips from Toast shifts (default)', () => {
     expect(result.issues).toContainEqual({ severity: 'check', message: expect.stringMatching(/no card tips on the shift records/) });
     // All three check methods side by side, for comparing with Toast's Tip Summary.
     expect(result.details.tips.cardTipsByMethod).toEqual({
+      restaurant_service: { Lunch: 32.5, Dinner: 62.5 }, // test orders have no Toast service, so time open is used
       check_time: { Lunch: 32.5, Dinner: 62.5 },
       check_items: { Lunch: 35, Dinner: 60 }, // the test items have no times, so they count from when the check opened
       payment: { Lunch: 25, Dinner: 70 },

@@ -7,6 +7,7 @@ export interface Reference {
   employees: Map<string, { name: string; jobGuids: string[]; deleted: boolean }>;
   salesCategories: Map<string, string>;
   revenueCenters: Map<string, string>;
+  restaurantServices: Map<string, string>;
 }
 
 export interface DayData {
@@ -64,12 +65,14 @@ export class ToastRepository {
   }
 
   private async loadReference(): Promise<Reference> {
-    const [restaurant, jobs, employees, salesCategories, revenueCenters] = await Promise.all([
+    const [restaurant, jobs, employees, salesCategories, revenueCenters, restaurantServices] = await Promise.all([
       this.api.getRestaurant(),
       this.api.listJobs(),
       this.api.listEmployees(),
       this.api.listSalesCategories(),
       this.api.listRevenueCenters(),
+      // Optional: older or restricted credentials may not reach this endpoint; tips then fall back to other methods.
+      this.api.listRestaurantServices().catch(() => []),
     ]);
     return {
       restaurant,
@@ -86,6 +89,7 @@ export class ToastRepository {
       ),
       salesCategories: new Map(salesCategories.map((category) => [category.guid, category.name?.trim() || 'Uncategorized'])),
       revenueCenters: new Map(revenueCenters.map((center) => [center.guid, center.name?.trim() || 'Unnamed revenue center'])),
+      restaurantServices: new Map(restaurantServices.map((service) => [service.guid, service.name?.trim() || 'Unnamed service'])),
     };
   }
 }

@@ -56,6 +56,8 @@ export interface TipoutInputs {
       source: string;
       /** Card tips per period under each check-based method, for comparing with Toast's Tip Summary. */
       cardTipsByMethod: Record<string, Record<Period, number>>;
+      /** Card tips on orders Toast didn't tag as Lunch or Dinner; restaurant_service shares these by time open. */
+      cardTipsWithoutToastService: number;
       /** Shifts (or checks, for check-based sources) whose tips were shared between Lunch and Dinner. */
       spanningBothPeriods: { count: number; toLunch: number; toDinner: number };
       cardTipsOnShifts: Record<Period, number>;
@@ -201,12 +203,14 @@ export function buildTipoutInputs(day: DayData, ref: Reference, config: TipoutCo
   const checkMethod = useShifts ? 'check_time' : config.cardTipSource;
   const splitChecks = { count: 0, lunchCents: 0, dinnerCents: 0 };
   // Card tips per period under every check-based method, so a real day can be compared with Toast's Tip Summary.
-  const byMethod: Record<'check_time' | 'check_items' | 'payment', Shares> = {
+  const byMethod: Record<'restaurant_service' | 'check_time' | 'check_items' | 'payment', Shares> = {
+    restaurant_service: { Lunch: 0, Dinner: 0 },
     check_time: { Lunch: 0, Dinner: 0 },
     check_items: { Lunch: 0, Dinner: 0 },
     payment: { Lunch: 0, Dinner: 0 },
   };
   let earlyTipCents = 0;
+  let noServiceTipCents = 0;
   let undatedTipCents = 0;
   let undatedOrders = 0;
   for (const order of day.orders) {
@@ -247,14 +251,19 @@ export function buildTipoutInputs(day: DayData, ref: Reference, config: TipoutCo
       const paidTimes = payments.map((payment) => parseInstant(payment.paidDate)).filter((t): t is number => t !== undefined);
       const checkStart = parseInstant(c.openedDate) ?? opened;
       const checkEnd = parseInstant(c.closedDate) ?? (paidTimes.length ? Math.max(...paidTimes) : undefined) ?? checkStart;
+      const timeOpen = timeShares(checkStart, checkEnd, dinnerStart, periodOf);
+      // Toast's own Lunch/Dinner assignment for the order, when the service name says which.
+      const serviceName = order.restaurantService ? ref.restaurantServices.get(order.restaurantService.guid) : undefined;
+      const servicePeriod = serviceName ? PERIODS.find((period) => normalize(serviceName).includes(normalize(period))) : undefined;
+      const toastService = servicePeriod ? oneHot(servicePeriod) : undefined;
+      const itemsRung = itemShares(c.selections ?? [], checkStart, periodOf) ?? timeOpen;
       // How this check's card tips and auto-gratuity are shared between Lunch and Dinner (see cardTipSource).
       const shares =
         checkMethod === 'payment'
           ? undefined
-          : (checkMethod === 'check_items' ? itemShares(c.selections ?? [], checkStart, periodOf) : undefined) ??
+          : (checkMethod === 'restaurant_service' ? toastService : undefined) ??
+            (checkMethod === 'check_items' ? itemShares(c.selections ?? [], checkStart, periodOf) : undefined) ??
             timeShares(checkStart, checkEnd, dinnerStart, periodOf);
-      const timeOpen = timeShares(checkStart, checkEnd, dinnerStart, periodOf);
-      const itemsRung = itemShares(c.selections ?? [], checkStart, periodOf) ?? timeOpen;
       const paidAt = (payment: (typeof payments)[number]) => parseInstant(payment.paidDate) ?? parseInstant(c.closedDate) ?? opened;
 
       const gratuity = (c.appliedServiceCharges ?? [])
@@ -286,7 +295,9 @@ export function buildTipoutInputs(day: DayData, ref: Reference, config: TipoutCo
           undatedTipCents += tip;
           continue;
         }
+        if (!toastService) noServiceTipCents += tip;
         for (const [method, methodShares] of [
+          ['restaurant_service', toastService ?? timeOpen],
           ['check_time', timeOpen],
           ['check_items', itemsRung],
           ['payment', paid === undefined ? undefined : oneHot(periodOf(paid))],
@@ -523,6 +534,7 @@ export function buildTipoutInputs(day: DayData, ref: Reference, config: TipoutCo
       timeZone,
       tips: {
         source: sourceUsed,
+        cardTipsWithoutToastService: dollars(noServiceTipCents),
         cardTipsByMethod: Object.fromEntries(
           Object.entries(byMethod).map(([method, shares]) => [method, { Lunch: dollars(shares.Lunch), Dinner: dollars(shares.Dinner) }]),
         ) as Record<string, Record<Period, number>>,

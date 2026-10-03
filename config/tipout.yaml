@@ -12,6 +12,7 @@ periods:
 # Where each period's card tips and auto-gratuity come from:
 #   time_entries - what Toast credited to each shift (Toast's own allocation, as on its Tip Summary).
 #                  A shift that crosses into the next period is split by time worked on each side. (default)
+#   restaurant_service - from the day's checks, by the Lunch/Dinner service Toast assigned each order
 #   check_time   - rebuilt from the day's checks; a check open across both periods is shared by time open in each
 #   check_items  - rebuilt from the day's checks; shared by the sales rung in each period
 #   payment      - rebuilt from the day's checks; all to the period each payment was made in

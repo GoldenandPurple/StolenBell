@@ -122,6 +122,8 @@ export interface ToastOrder {
   numberOfGuests?: number;
   server?: ToastReference | null;
   revenueCenter?: ToastReference | null;
+  /** Toast's own meal-service assignment for the order (e.g. Lunch, Dinner). */
+  restaurantService?: ToastReference | null;
   diningOption?: ToastReference | null;
   checks?: ToastCheck[];
 }
