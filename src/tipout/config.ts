@@ -13,6 +13,9 @@ export const TipoutConfigSchema = z
       .object({ lunchStart: clock.default('11:00'), dinnerStart: clock.default('16:00') })
       .default({ lunchStart: '11:00', dinnerStart: '16:00' }),
     foodCategories: z.array(z.string().min(1)).min(1).default(['Food']),
+    // How a check's card tips and auto-gratuity are shared between Lunch and Dinner when it spans both:
+    // time = by how long it was open in each period; items = by sales rung in each; payment = all to when it was paid.
+    cardTipSplit: z.enum(['time', 'items', 'payment']).default('time'),
     roles: z.record(z.string(), z.enum([...TIPOUT_ROLES, 'ignore'])).default({}),
     timeZone: z.string().optional(),
   })

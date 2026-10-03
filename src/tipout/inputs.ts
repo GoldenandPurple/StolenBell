@@ -50,6 +50,9 @@ export interface TipoutInputs {
   input: TipoutInputDocument;
   details: {
     timeZone: string;
+    cardTipSplit: string;
+    /** Checks whose card tips/auto-gratuity were shared between Lunch and Dinner, and how much went to each. */
+    checksSpanningBothPeriods: { count: number; toLunch: number; toDinner: number };
     periodWindows: Record<Period, string>;
     perPeriod: Record<Period, PeriodDetails>;
     jobMapping: Record<string, string>;
@@ -97,6 +100,46 @@ const centsToDollars = (record: Record<string, number>) =>
       .map(([key, value]) => [key, dollars(value)]),
   );
 
+type Shares = Record<Period, number>;
+
+const oneHot = (period: Period): Shares => (period === 'Lunch' ? { Lunch: 1, Dinner: 0 } : { Lunch: 0, Dinner: 1 });
+
+/** Shares by how long the check was open in each period. */
+function timeShares(start: number | undefined, end: number | undefined, dinnerStart: number, periodOf: (t: number) => Period): Shares | undefined {
+  if (start !== undefined && end !== undefined && end > start) {
+    return { Lunch: overlapMs(start, end, -Infinity, dinnerStart), Dinner: overlapMs(start, end, dinnerStart, Infinity) };
+  }
+  const instant = end ?? start;
+  return instant === undefined ? undefined : oneHot(periodOf(instant));
+}
+
+/** Shares by the sales rung in each period (by when each item was added to the check). */
+function itemShares(
+  selections: { price?: number; voided?: boolean; createdDate?: string }[],
+  checkStart: number | undefined,
+  periodOf: (t: number) => Period,
+): Shares | undefined {
+  const shares: Shares = { Lunch: 0, Dinner: 0 };
+  for (const selection of selections) {
+    if (selection.voided) continue;
+    const at = parseInstant(selection.createdDate) ?? checkStart;
+    if (at !== undefined) shares[periodOf(at)] += Math.max(0, cents(selection.price));
+  }
+  return shares.Lunch + shares.Dinner > 0 ? shares : undefined;
+}
+
+/** Splits whole cents by share, largest remainder, so the parts always add back to the total. */
+function splitCents(total: number, shares: Shares): [Period, number][] {
+  const sum = shares.Lunch + shares.Dinner;
+  const lunchExact = (total * shares.Lunch) / sum;
+  let lunch = Math.floor(lunchExact);
+  if (lunchExact - lunch >= 0.5) lunch += 1;
+  return [
+    ['Lunch', lunch],
+    ['Dinner', total - lunch],
+  ];
+}
+
 export function buildTipoutInputs(day: DayData, ref: Reference, config: TipoutConfig, cash: CashEntry = {}): TipoutInputs {
   const businessDate = isoFromBusinessDate(day.businessDate);
   const issues: Issue[] = [];
@@ -127,7 +170,9 @@ export function buildTipoutInputs(day: DayData, ref: Reference, config: TipoutCo
     check(`Food categories not found in Toast and ignored: ${missingFood.join(', ')}.`);
   }
 
-  // Orders: sales go to the period the order was opened in; tips to the period they were paid in.
+  // Orders: sales go to the period the order was opened in. Card tips and auto-gratuity are
+  // shared between periods per config.cardTipSplit (by default, by how long each check was open in each).
+  const splitChecks = { count: 0, lunchCents: 0, dinnerCents: 0 };
   let earlyTipCents = 0;
   let undatedTipCents = 0;
   let undatedOrders = 0;
@@ -166,43 +211,64 @@ export function buildTipoutInputs(day: DayData, ref: Reference, config: TipoutCo
 
     for (const c of checks) {
       const payments = (c.payments ?? []).filter(paymentCounts);
-      const checkPaid =
-        payments.map((payment) => parseInstant(payment.paidDate)).find((instant) => instant !== undefined) ??
-        parseInstant(c.closedDate) ??
-        opened;
-      // Auto-gratuity is a service charge on the check, so it goes to the period the check was paid in.
+      const paidTimes = payments.map((payment) => parseInstant(payment.paidDate)).filter((t): t is number => t !== undefined);
+      const checkStart = parseInstant(c.openedDate) ?? opened;
+      const checkEnd = parseInstant(c.closedDate) ?? (paidTimes.length ? Math.max(...paidTimes) : undefined) ?? checkStart;
+      // How this check's card tips and auto-gratuity are shared between Lunch and Dinner (see cardTipSplit).
+      const shares =
+        config.cardTipSplit === 'payment'
+          ? undefined
+          : (config.cardTipSplit === 'items' ? itemShares(c.selections ?? [], checkStart, periodOf) : undefined) ??
+            timeShares(checkStart, checkEnd, dinnerStart, periodOf);
+      const paidAt = (payment: (typeof payments)[number]) => parseInstant(payment.paidDate) ?? parseInstant(c.closedDate) ?? opened;
+
       const gratuity = (c.appliedServiceCharges ?? [])
         .filter((charge) => charge.gratuity)
         .reduce((sum, charge) => sum + cents(charge.chargeAmount), 0);
       if (gratuity) {
-        if (checkPaid === undefined) undatedTipCents += gratuity;
-        else acc[periodOf(checkPaid)].gratuityCents += gratuity;
+        const firstPaid = paidTimes[0] ?? parseInstant(c.closedDate) ?? opened;
+        const gratuityShares = shares ?? (firstPaid === undefined ? undefined : oneHot(periodOf(firstPaid)));
+        if (!gratuityShares) undatedTipCents += gratuity;
+        else for (const [period, amount] of splitCents(gratuity, gratuityShares)) acc[period].gratuityCents += amount;
       }
 
+      let checkCardTips = 0;
       for (const payment of payments) {
         const tip = cents(payment.tipAmount);
         const type = (payment.type ?? 'UNKNOWN').toUpperCase();
-        const paid = parseInstant(payment.paidDate) ?? parseInstant(c.closedDate) ?? opened;
-        if (type === 'CASH' && paid !== undefined) acc[periodOf(paid)].cashSalesCents += cents(payment.amount);
+        const paid = paidAt(payment);
+        // Cash isn't pooled from Toast (the GM counts the till), so it's only reported, by payment time.
+        if (type === 'CASH') {
+          if (paid !== undefined) {
+            acc[periodOf(paid)].cashSalesCents += cents(payment.amount);
+            acc[periodOf(paid)].cashTipCents += tip;
+          } else if (tip) undatedTipCents += tip;
+          continue;
+        }
         if (tip === 0) continue;
-        if (paid === undefined) {
+        const tipShares = shares ?? (paid === undefined ? undefined : oneHot(periodOf(paid)));
+        if (!tipShares) {
           undatedTipCents += tip;
           continue;
         }
-        const bucket = acc[periodOf(paid)];
-        if (type === 'CASH') {
-          bucket.cashTipCents += tip;
-          continue;
+        if ((checkEnd ?? paid ?? Infinity) < lunchStart) earlyTipCents += tip;
+        checkCardTips += tip;
+        for (const [period, amount] of splitCents(tip, tipShares)) {
+          acc[period].cardTipCents += amount;
+          acc[period].cardTipsByType[type] = (acc[period].cardTipsByType[type] ?? 0) + amount;
         }
-        if (paid < lunchStart) earlyTipCents += tip;
-        bucket.cardTipCents += tip;
-        bucket.cardTipsByType[type] = (bucket.cardTipsByType[type] ?? 0) + tip;
+      }
+      if (shares && shares.Lunch > 0 && shares.Dinner > 0 && checkCardTips + gratuity > 0) {
+        const [[, lunch], [, dinner]] = splitCents(checkCardTips + gratuity, shares);
+        splitChecks.count += 1;
+        splitChecks.lunchCents += lunch;
+        splitChecks.dinnerCents += dinner;
       }
     }
   }
   if (undatedTipCents) stop(`${money(undatedTipCents)} of tips have no payment time, so they can't be put in Lunch or Dinner.`);
   if (undatedOrders) stop(`${undatedOrders} order(s) with sales have no opened time, so their sales can't be put in Lunch or Dinner.`);
-  if (earlyTipCents) check(`${money(earlyTipCents)} of card tips were paid before ${config.periods.lunchStart}; they are counted in Lunch.`);
+  if (earlyTipCents) check(`${money(earlyTipCents)} of card tips were on checks closed before ${config.periods.lunchStart}; they are counted in Lunch.`);
 
   // Time entries: hours split at the period boundaries, minus unpaid breaks.
   const roleMap = new Map(Object.entries(config.roles).map(([job, role]) => [normalize(job), role]));
@@ -330,6 +396,12 @@ export function buildTipoutInputs(day: DayData, ref: Reference, config: TipoutCo
     input: { business_date: businessDate, periods },
     details: {
       timeZone,
+      cardTipSplit: config.cardTipSplit,
+      checksSpanningBothPeriods: {
+        count: splitChecks.count,
+        toLunch: dollars(splitChecks.lunchCents),
+        toDinner: dollars(splitChecks.dinnerCents),
+      },
       periodWindows: { Lunch: `${clock(lunchStart)}–${clock(dinnerStart)}`, Dinner: `${clock(dinnerStart)}–close` },
       perPeriod,
       jobMapping,

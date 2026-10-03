@@ -74,6 +74,7 @@ export interface ToastRevenueCenter {
 
 export interface ToastSelection {
   displayName?: string;
+  createdDate?: string;
   quantity?: number;
   price?: number; // net of discounts, excludes tax
   preDiscountPrice?: number;

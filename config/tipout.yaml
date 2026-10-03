@@ -9,6 +9,13 @@ periods:
   lunchStart: "11:00"
   dinnerStart: "16:00"
 
+# How a check's card tips and auto-gratuity are shared between Lunch and Dinner when the check
+# spans both (e.g. opened 3:30, paid 4:30):
+#   time    - in proportion to how long the check was open in each period (default)
+#   items   - in proportion to the sales rung in each period
+#   payment - all to the period it was paid in
+cardTipSplit: time
+
 # Toast sales categories that count as food for the kitchen's 10%.
 foodCategories:
   - Food

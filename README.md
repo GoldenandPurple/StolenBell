@@ -67,8 +67,7 @@ To change the **rules**, edit `tipout.py` (and its tests). To change how **Toast
 
 How `get_tipout_inputs` buckets the day:
 
-- **Card tips**: every non-cash payment's tip, in the period it was paid (payment time, falling back to check close time).
-- **Auto-gratuity**: gratuity service charges, in the period the check was paid.
+- **Card tips and auto-gratuity**: every non-cash payment's tip and every gratuity service charge, in the period the check was open in. A check open across both periods is shared between them by `cardTipSplit` in the config: `time` (default) in proportion to how long it was open in each, `items` by the sales rung in each, or `payment` all to when it was paid. Shares are whole cents and always add back to the full tip.
 - **Cash tips**: not in Toast. The GM's till counts (4:00 changeover and close) are passed as `cashLunch` / `cashDinner`; until both are given, the result isn't ready.
 - **Cash sales**: cash payments excluding tips, for the Cash Out form only.
 - **Sales**: non-voided items on non-voided checks, in the period the order was opened. Gross food is items in `foodCategories` before discounts, as Toast reports gross sales; net sales is every category after discounts. Both are pre-tax.

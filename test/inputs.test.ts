@@ -85,11 +85,43 @@ const baseDay = (): DayData => ({
 });
 
 describe('buildTipoutInputs', () => {
-  it('splits sales by order time and card tips by payment time', () => {
+  it('shares a check\'s card tip between periods by how long it was open in each (default)', () => {
     const result = buildTipoutInputs(baseDay(), ref, config, CASH);
-    expect(result.input.periods.Lunch).toMatchObject({ pool_card_tips: 25, gross_food_sales: 150, net_sales: 170 });
-    expect(result.input.periods.Dinner).toMatchObject({ pool_card_tips: 70, gross_food_sales: 240, net_sales: 330, cash_tips_manual: 0 });
+    // The 15:30-16:10 check's $10 tip: 30 min lunch, 10 min dinner -> $7.50 / $2.50.
+    expect(result.input.periods.Lunch).toMatchObject({ pool_card_tips: 32.5, gross_food_sales: 150, net_sales: 170 });
+    expect(result.input.periods.Dinner).toMatchObject({ pool_card_tips: 62.5, gross_food_sales: 240, net_sales: 330, cash_tips_manual: 0 });
+    expect(result.details.checksSpanningBothPeriods).toEqual({ count: 1, toLunch: 7.5, toDinner: 2.5 });
     expect(result.details.perPeriod.Dinner.cashTipsRecordedInToast).toBe(9);
+  });
+
+  it('can put card tips in the period they were paid instead', () => {
+    const byPayment = TipoutConfigSchema.parse({ ...config, cardTipSplit: 'payment' });
+    const result = buildTipoutInputs(baseDay(), ref, byPayment, CASH);
+    expect(result.input.periods.Lunch!.pool_card_tips).toBe(25);
+    expect(result.input.periods.Dinner!.pool_card_tips).toBe(70);
+    expect(result.details.checksSpanningBothPeriods.count).toBe(0);
+  });
+
+  it('can share card tips by the sales rung in each period', () => {
+    const byItems = TipoutConfigSchema.parse({ ...config, cardTipSplit: 'items' });
+    const day = baseDay();
+    const spanning = order(at('15:00'), at('17:00'), 0, 0, 20);
+    spanning.checks![0]!.selections = [
+      { price: 30, createdDate: at('15:05'), salesCategory: { guid: 'c-food' } },
+      { price: 90, createdDate: at('16:30'), salesCategory: { guid: 'c-food' } },
+      { price: 500, voided: true, createdDate: at('15:10'), salesCategory: { guid: 'c-food' } },
+    ];
+    day.orders = [spanning];
+    const { Lunch, Dinner } = buildTipoutInputs(day, ref, byItems, CASH).input.periods;
+    expect([Lunch!.pool_card_tips, Dinner!.pool_card_tips]).toEqual([5, 15]); // $30 vs $90 rung
+    expect(Lunch!.net_sales).toBe(120); // sales still follow when the order was opened
+  });
+
+  it('keeps every cent when a tip is shared', () => {
+    const day = baseDay();
+    day.orders = [order(at('15:00'), at('16:30'), 10, 0, 10.01)]; // 60 min lunch, 30 min dinner
+    const { Lunch, Dinner } = buildTipoutInputs(day, ref, config, CASH).input.periods;
+    expect([Lunch!.pool_card_tips, Dinner!.pool_card_tips]).toEqual([6.67, 3.34]);
   });
 
   it('counts gross food before discounts and net sales after', () => {
@@ -102,14 +134,15 @@ describe('buildTipoutInputs', () => {
     expect(lunch.net_sales).toBe(170 + 40);
   });
 
-  it('puts auto-gratuity in the period the check was paid, and totals cash sales', () => {
+  it('shares auto-gratuity like card tips, and totals cash sales', () => {
     const day = baseDay();
     const party = order(at('15:20'), at('16:05'), 300, 0, 0);
     party.checks![0]!.appliedServiceCharges = [{ name: 'Auto grat', chargeAmount: 54, gratuity: true }, { name: 'Corkage', chargeAmount: 20, gratuity: false }];
     day.orders.push(party);
     const { Lunch, Dinner } = buildTipoutInputs(day, ref, config, CASH).input.periods;
-    expect(Lunch!.auto_gratuity).toBe(0);
-    expect(Dinner!.auto_gratuity).toBe(54);
+    // 15:20-16:05: 40 min lunch, 5 min dinner
+    expect(Lunch!.auto_gratuity).toBe(48);
+    expect(Dinner!.auto_gratuity).toBe(6);
     expect(Lunch!.net_sales).toBe(470); // the party's sales stay with the period it was opened in
     day.orders[3]!.checks![0]!.payments![0]!.amount = 52.5;
     expect(buildTipoutInputs(day, ref, config, CASH).input.periods.Dinner!.cash_sales).toBe(52.5);
@@ -164,7 +197,7 @@ describe('buildTipoutInputs', () => {
 
   it('stops when a period has sales but no card tips', () => {
     const day = baseDay();
-    day.orders = day.orders.filter((o) => !o.openedDate!.startsWith(at('12:00').slice(0, 16)));
+    day.orders = day.orders.filter((o) => Date.parse(o.openedDate!) >= Date.parse(at('16:00')));
     day.orders.push(order(at('13:00'), at('13:30'), 80, 0, 0));
     const result = buildTipoutInputs(day, ref, config, CASH);
     expect(result.issues).toContainEqual({ severity: 'stop', message: expect.stringMatching(/^Lunch has .* \$0 in card tips/) });
