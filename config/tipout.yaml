@@ -23,7 +23,8 @@ foodCategories:
 
 # Toast job title -> tip-out role. Roles: Bartender, Server (both share the bar/server remainder),
 # Host, Barback, Busser, Runner (support), Kitchen, or "ignore" to leave a job out entirely.
-# Matching ignores upper/lower case but is otherwise exact ("Chef" and "Chef OFFICE" are different jobs).
+# Matching ignores case, extra spaces and punctuation ("Lead Bartender - ADMIN" matches "Lead Bartender ADMIN"),
+# but the words must match: "Chef" and "Chef OFFICE" are different jobs.
 roles:
   # Bar & servers
   Bartender: Bartender

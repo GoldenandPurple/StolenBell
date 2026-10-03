@@ -5,7 +5,7 @@ import { businessDates, MAX_RANGE_DAYS } from './data/dates.js';
 import type { ToastRepository } from './data/repository.js';
 import { laborReport, salesReport, tipsReport, topItemsReport } from './reports.js';
 import type { TipoutConfig } from './tipout/config.js';
-import { buildTipoutInputs } from './tipout/inputs.js';
+import { buildTipoutInputs, normalize } from './tipout/inputs.js';
 
 export interface ServerDeps {
   config: AppConfig;
@@ -72,7 +72,7 @@ export function createServer({ config, repo, loadTipoutConfig }: ServerDeps): Mc
           /** Toast jobs not listed under roles; they're handled per otherJobs. */
           unlistedJobs: [...ref.jobs.values()]
             .map((job) => job.title)
-            .filter((title) => !Object.keys(tipout.roles).some((job) => job.toLowerCase() === title.toLowerCase())),
+            .filter((title) => !Object.keys(tipout.roles).some((job) => normalize(job) === normalize(title))),
         },
         wagesVisible: config.includeWages,
       });

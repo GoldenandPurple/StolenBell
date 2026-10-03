@@ -97,7 +97,13 @@ const blank = (): Accumulator => ({
 });
 
 const HOUR_MS = 3_600_000;
-const normalize = (value: string) => value.trim().toLowerCase();
+/** For matching job titles and categories: ignores case, spacing and punctuation ("Lead Bartender - ADMIN" = "lead bartender admin"). */
+export const normalize = (value: string) =>
+  value
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
 const money = (amountCents: number) => `$${dollars(amountCents).toFixed(2)}`;
 const overlapMs = (start: number, end: number, from: number, to: number) =>
   Math.max(0, Math.min(end, to) - Math.max(start, from));

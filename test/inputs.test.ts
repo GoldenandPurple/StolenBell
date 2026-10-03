@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { DayData, Reference } from '../src/data/repository.js';
 import { zonedTimeToUtc } from '../src/data/zoned.js';
 import { TipoutConfigSchema } from '../src/tipout/config.js';
-import { buildTipoutInputs, shortName } from '../src/tipout/inputs.js';
+import { buildTipoutInputs, normalize, shortName } from '../src/tipout/inputs.js';
 import type { ToastOrder, ToastTimeEntry } from '../src/toast/types.js';
 
 const TZ = 'America/Vancouver';
@@ -282,6 +282,16 @@ describe('jobs not listed in the config', () => {
     const result = buildTipoutInputs(day, ref, catchAll, CASH);
     expect(result.input.periods.Dinner!.staff.map((s) => s.name)).not.toContain('Sam');
     expect(result.issues.map((i) => i.message).join()).not.toMatch(/treated as/);
+  });
+});
+
+describe('job title matching', () => {
+  it('ignores case, spacing and punctuation but not words', () => {
+    expect(normalize('Lead Bartender - ADMIN')).toBe(normalize('Lead Bartender ADMIN'));
+    expect(normalize('General  Manager ')).toBe(normalize('General Manager'));
+    expect(normalize('General\u00a0Manager')).toBe(normalize('General Manager'));
+    expect(normalize('Chef OFFICE')).not.toBe(normalize('Chef'));
+    expect(normalize('Lead Bartender ADMIN')).not.toBe(normalize('Lead Bartender'));
   });
 });
 
