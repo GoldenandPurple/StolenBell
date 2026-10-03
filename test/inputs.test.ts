@@ -92,6 +92,16 @@ describe('buildTipoutInputs', () => {
     expect(result.details.perPeriod.Dinner.cashTipsRecordedInToast).toBe(9);
   });
 
+  it('counts gross food before discounts and net sales after', () => {
+    const day = baseDay();
+    const discounted = order(at('13:00'), at('13:30'), 0, 0, 5);
+    discounted.checks![0]!.selections = [{ price: 40, preDiscountPrice: 50, salesCategory: { guid: 'c-food' } }];
+    day.orders.push(discounted);
+    const lunch = buildTipoutInputs(day, ref, config, CASH).input.periods.Lunch!;
+    expect(lunch.gross_food_sales).toBe(150 + 50);
+    expect(lunch.net_sales).toBe(170 + 40);
+  });
+
   it('puts auto-gratuity in the period the check was paid, and totals cash sales', () => {
     const day = baseDay();
     const party = order(at('15:20'), at('16:05'), 300, 0, 0);

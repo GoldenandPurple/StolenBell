@@ -148,7 +148,8 @@ export function buildTipoutInputs(day: DayData, ref: Reference, config: TipoutCo
           (selection.salesCategory && ref.salesCategories.get(selection.salesCategory.guid)) || 'Uncategorized';
         orderNet += net;
         orderCategories[category] = (orderCategories[category] ?? 0) + net;
-        if (foodCategories.has(normalize(category))) orderFood += net;
+        // Gross food is before discounts, matching Toast's gross sales; net sales is after.
+        if (foodCategories.has(normalize(category))) orderFood += cents(selection.preDiscountPrice ?? selection.price);
       }
     }
     if (opened === undefined) {

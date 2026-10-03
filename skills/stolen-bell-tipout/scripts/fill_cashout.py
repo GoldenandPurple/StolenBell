@@ -32,7 +32,7 @@ from tipout import SUPPORT_ROLES, TIPPED_ROLES, compute_day  # noqa: E402
 
 FORM = Path(__file__).resolve().parent.parent / "forms" / "CashOut_Form.xlsx"
 TEMPLATE_SHEET = "Cash Out"
-SUPPORT_ROWS = [23, 24]
+SUPPORT_ROWS = [23, 24, 25]
 TIPPED_ROWS = list(range(30, 40))
 TOLERANCE = Decimal("0.01")  # the form doesn't round to the cent; the engine does
 
@@ -41,27 +41,28 @@ def _d(value) -> Decimal:
     return Decimal(str(value or 0))
 
 
-def _merged(staff: list[dict], roles: set[str]) -> list[tuple[str, Decimal]]:
-    """One row per person (summing hours if they appear more than once), in input order."""
-    hours: dict[str, Decimal] = {}
+def _merged(staff: list[dict], roles: set[str], by_role: bool = False) -> list[tuple]:
+    """One row per person (per person and role if by_role), summing hours, in input order."""
+    hours: dict[tuple, Decimal] = {}
     for s in staff:
         if s["role"] in roles and _d(s["hours"]) > 0:
-            hours[s["name"]] = hours.get(s["name"], Decimal("0")) + _d(s["hours"])
-    return list(hours.items())
+            key = (s["name"], s["role"]) if by_role else (s["name"],)
+            hours[key] = hours.get(key, Decimal("0")) + _d(s["hours"])
+    return [(*key, h) for key, h in hours.items()]
 
 
 def form_math(p: dict, support: list, tipped: list) -> dict:
     """What the form's formulas will calculate, mirroring CashOut_Form.xlsx cell by cell."""
     pool = _d(p.get("auto_gratuity")) + _d(p.get("pool_card_tips")) + _d(p.get("cash_tips_manual"))  # B16
     kitchen = Decimal("0.1") * _d(p.get("gross_food_sales"))  # B19
-    filled = len(support)  # B20 counts names entered in B23:B24
-    rate = Decimal("0.0225") if filled >= 2 else Decimal("0.015") if filled == 1 else Decimal("0")
+    roles = {role for _, role, h in support if h > 0}  # B20: which support roles have hours
+    rate = Decimal("0.0225") if {"Host", "Barback"} <= roles else Decimal("0.015") if roles else Decimal("0")
     support_total = rate * _d(p.get("net_sales"))  # B21
     remainder = pool - kitchen - support_total  # B26
-    s_hours = sum((h for _, h in support), Decimal("0"))
+    s_hours = sum((h for _, _, h in support), Decimal("0"))
     t_hours = sum((h for _, h in tipped), Decimal("0"))
     payouts: dict[str, Decimal] = {}
-    for name, h in support:  # D23:D24
+    for name, _, h in support:  # D23:D25
         payouts[name] = payouts.get(name, Decimal("0")) + (support_total * h / s_hours if s_hours else Decimal("0"))
     for name, h in tipped:  # E30:E39
         payouts[name] = payouts.get(name, Decimal("0")) + (remainder * h / t_hours if t_hours else Decimal("0"))
@@ -69,7 +70,7 @@ def form_math(p: dict, support: list, tipped: list) -> dict:
 
 
 def check_period(name: str, p: dict, result) -> tuple[list, list, list[str]]:
-    support = _merged(p.get("staff", []), SUPPORT_ROLES)
+    support = _merged(p.get("staff", []), SUPPORT_ROLES, by_role=True)
     tipped = _merged(p.get("staff", []), TIPPED_ROLES)
     problems = []
     if len(support) > len(SUPPORT_ROWS):
@@ -80,7 +81,7 @@ def check_period(name: str, p: dict, result) -> tuple[list, list, list[str]]:
         return support, tipped, problems
 
     form = form_math(p, support, tipped)
-    engine = {n: Decimal("0") for n, _ in support + tipped}
+    engine = {row[0]: Decimal("0") for row in support + tipped}
     for n, amt in result.support_payouts.items():
         engine[n] += amt
     for n, amt in result.tipped_payouts.items():
@@ -89,8 +90,7 @@ def check_period(name: str, p: dict, result) -> tuple[list, list, list[str]]:
         problems.append(f"{name}: form kitchen {form['kitchen']:.2f} vs engine {result.kitchen}.")
     if abs(form["support_total"] - result.support_total) >= TOLERANCE:
         problems.append(
-            f"{name}: form support {form['support_total']:.2f} vs engine {result.support_total} "
-            f"(the form sets the rate by how many support names are filled in, the rules by which roles worked)."
+            f"{name}: form support {form['support_total']:.2f} vs engine {result.support_total}."
         )
     for person in engine:
         if abs(form["payouts"][person] - engine[person]) >= TOLERANCE:
@@ -131,14 +131,15 @@ def fill(doc: dict, out: Path, completed_by: str | None) -> dict:
         ws["B13"] = float(_d(p.get("auto_gratuity")))
         ws["B14"] = float(_d(p.get("pool_card_tips")))
         ws["B15"] = float(_d(p.get("cash_tips_manual")))
-        for row, (person, hours) in zip(SUPPORT_ROWS, support):
-            ws[f"B{row}"], ws[f"C{row}"] = person, float(hours)
+        for row, (person, role, hours) in zip(SUPPORT_ROWS, support):
+            ws[f"B{row}"], ws[f"C{row}"], ws[f"E{row}"] = person, float(hours), role
         for row, (person, hours) in zip(TIPPED_ROWS, tipped):
             ws[f"B{row}"], ws[f"C{row}"] = person, float(hours)
-        # copy_worksheet doesn't carry data validation; restore the Service dropdown.
-        dv = DataValidation(type="list", formula1='"Lunch,Dinner"', allow_blank=True)
-        ws.add_data_validation(dv)
-        dv.add("E4")
+        # copy_worksheet doesn't carry data validation; restore the dropdowns.
+        for cells, choices in (("E4", '"Lunch,Dinner"'), ("E23:E25", '"Host,Barback"')):
+            dv = DataValidation(type="list", formula1=choices, allow_blank=True)
+            ws.add_data_validation(dv)
+            dv.add(cells)
         ws.print_options.horizontalCentered = template.print_options.horizontalCentered
         ws.page_setup.orientation = template.page_setup.orientation
         ws.page_setup.fitToWidth = template.page_setup.fitToWidth
@@ -152,6 +153,7 @@ def fill(doc: dict, out: Path, completed_by: str | None) -> dict:
         "sheets": list(periods),
         "per_person": {n: str(a) for n, a in day["per_person"].items()},
         "kitchen_lump_total": str(day["kitchen_lump_total"]),
+        "hourly_rate": {r.period: str(r.hourly_rate) for r in day["periods"]},
     }
 
 

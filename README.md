@@ -69,7 +69,7 @@ How `get_tipout_inputs` buckets the day:
 - **Auto-gratuity**: gratuity service charges, in the period the check was paid.
 - **Cash tips**: not in Toast. The GM's till counts (4:00 changeover and close) are passed as `cashLunch` / `cashDinner`; until both are given, the result isn't ready.
 - **Cash sales**: cash payments excluding tips, for the Cash Out form only.
-- **Sales**: non-voided items on non-voided checks, in the period the order was opened. Food is the net price of items in `foodCategories`; net sales is every category. Both are pre-tax and after discounts.
+- **Sales**: non-voided items on non-voided checks, in the period the order was opened. Gross food is items in `foodCategories` before discounts, as Toast reports gross sales; net sales is every category after discounts. Both are pre-tax.
 - **Hours**: from clock-in to clock-out, split at the period boundary, minus unpaid breaks. Several time entries for the same person and role are combined.
 - **It stops (`ready: false`)** on anything a person needs to resolve: a missing cash count, an open shift, an unmapped job, tips or orders without a time, a period with sales but $0 card tips, or no matching food category. Smaller things, such as hours before 11:00, come back as `check` issues to show the GM.
 

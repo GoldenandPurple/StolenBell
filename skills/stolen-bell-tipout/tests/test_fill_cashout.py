@@ -48,18 +48,23 @@ class FillCashOut(unittest.TestCase):
         ws = wb["Dinner"]
         self.assertEqual((ws["B4"].value, ws["E4"].value, ws["B5"].value), ("2026-09-27", "Dinner", "S. Thornton"))
         self.assertEqual((ws["B9"].value, ws["B10"].value, ws["B14"].value), (9500, 4200, 1800))
-        self.assertEqual([ws[f"B{r}"].value for r in (23, 24)], ["Priya (Host)", "Tomas (Barback)"])
+        self.assertEqual([(ws[f"B{r}"].value, ws[f"E{r}"].value) for r in (23, 24, 25)],
+                         [("Priya (Host)", "Host"), ("Tomas (Barback)", "Barback"), (None, None)])
         self.assertEqual([ws[f"B{r}"].value for r in (30, 31, 32, 33)], ["Mara (Bartender)", "Devon (Server)", "Sam (Server)", None])
         self.assertEqual(ws["B26"].value, "=B16-B19-B21")  # formulas are left intact
 
-    @unittest.skipIf(formulas is None, "formulas not installed")
-    def test_the_forms_own_formulas_agree_with_the_engine(self):
-        fill(EXAMPLE, self.out, None)
+    def evaluate(self):
         solution = formulas.ExcelModel().loads(str(self.out)).finish().calculate()
 
         def cell(sheet, ref):
             key = next(k for k in solution if k.upper().endswith(f"]{sheet.upper()}'!{ref}"))
             return Decimal(str(solution[key].value[0][0]))
+        return cell
+
+    @unittest.skipIf(formulas is None, "formulas not installed")
+    def test_the_forms_own_formulas_agree_with_the_engine(self):
+        fill(EXAMPLE, self.out, None)
+        cell = self.evaluate()
 
         day = compute_day(EXAMPLE)
         for r in day["periods"]:
@@ -67,13 +72,34 @@ class FillCashOut(unittest.TestCase):
             self.assertAlmostEqual(cell(r.period, "B21"), r.support_total, places=2)
             self.assertEqual(cell(r.period, "B45"), 0)
         self.assertLess(abs(cell("Dinner", "E30") - day["periods"][1].tipped_payouts["Mara (Bartender)"]), Decimal("0.01"))
+        self.assertLess(abs(cell("Dinner", "D30") - day["periods"][1].hourly_rate), Decimal("0.01"))
 
-    def test_refuses_when_two_hosts_would_get_the_wrong_support_rate(self):
+    @unittest.skipIf(formulas is None, "formulas not installed")
+    def test_two_hosts_get_the_one_role_rate_on_the_form(self):
         doc = one_period([{"name": "H1", "role": "Host", "hours": 4}, {"name": "H2", "role": "Host", "hours": 4},
                           {"name": "S", "role": "Server", "hours": 6}])
         summary = fill(doc, self.out, None)
+        self.assertEqual(summary["problems"], [])
+        cell = self.evaluate()
+        self.assertEqual(cell("Dinner", "B20"), Decimal("0.015"))
+        self.assertAlmostEqual(cell("Dinner", "B21"), Decimal("60"), places=2)
+        self.assertEqual(cell("Dinner", "B45"), 0)
+
+    @unittest.skipIf(formulas is None, "formulas not installed")
+    def test_host_and_barback_with_a_third_support_person(self):
+        doc = one_period([{"name": "H1", "role": "Host", "hours": 4}, {"name": "H2", "role": "Host", "hours": 2},
+                          {"name": "B", "role": "Barback", "hours": 6}, {"name": "S", "role": "Server", "hours": 6}])
+        summary = fill(doc, self.out, None)
+        self.assertEqual(summary["problems"], [])
+        cell = self.evaluate()
+        self.assertEqual(cell("Dinner", "B20"), Decimal("0.0225"))
+        self.assertAlmostEqual(cell("Dinner", "D25"), Decimal("45"), places=2)  # 90 support x 6/12 h
+
+    def test_refuses_when_support_staff_do_not_fit(self):
+        staff = [{"name": f"H{i}", "role": "Host", "hours": 2} for i in range(4)]
+        summary = fill(one_period(staff + [{"name": "S", "role": "Server", "hours": 6}]), self.out, None)
         self.assertIsNone(summary["written"])
-        self.assertTrue(any("form support 90.00 vs engine 60.00" in p for p in summary["problems"]))
+        self.assertTrue(any("only has 3 rows" in p for p in summary["problems"]))
         self.assertFalse(self.out.exists())
 
     def test_refuses_on_due_back(self):

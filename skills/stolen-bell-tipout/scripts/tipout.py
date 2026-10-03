@@ -83,6 +83,8 @@ class PeriodResult:
     support_payouts: dict
     tipped_payouts: dict
     due_back: Decimal = Decimal("0.00")
+    # What the remainder pays bar/servers per hour worked (same for everyone in the period).
+    hourly_rate: Decimal = Decimal("0.00")
     flags: list = field(default_factory=list)
 
 
@@ -134,12 +136,14 @@ def compute_period(period: str, data: dict) -> PeriodResult:
 
     support_payouts = _split_by_hours(support_total, support) if support else {}
     tipped_payouts = _split_by_hours(remainder, tipped) if (tipped and remainder > 0) else {}
+    tipped_hours = sum((Decimal(str(s["hours"])) for s in tipped), Decimal("0"))
+    hourly_rate = _money(remainder / tipped_hours) if (tipped_payouts and tipped_hours > 0) else Decimal("0.00")
 
     return PeriodResult(
         period=period, pool=pool, kitchen=kitchen, support_rate=s_rate,
         support_total=support_total, remainder=remainder,
         support_payouts=support_payouts, tipped_payouts=tipped_payouts,
-        due_back=due_back, flags=flags,
+        due_back=due_back, hourly_rate=hourly_rate, flags=flags,
     )
 
 
@@ -166,7 +170,7 @@ def format_report(day: dict) -> str:
         if r.due_back > 0:
             lines.append(f"  Remainder (bar/servers) ${Decimal('0.00'):>10,.2f}   (DUE BACK ${r.due_back:,.2f})")
         else:
-            lines.append(f"  Remainder (bar/servers) ${r.remainder:>10,.2f}")
+            lines.append(f"  Remainder (bar/servers) ${r.remainder:>10,.2f}   (${r.hourly_rate:,.2f} per hour worked)")
         for n, a in r.support_payouts.items():
             lines.append(f"      {n:<20} ${a:>10,.2f}  (support)")
         for n, a in r.tipped_payouts.items():
@@ -200,6 +204,7 @@ if __name__ == "__main__":
                 "period": r.period, "pool": str(r.pool), "kitchen": str(r.kitchen),
                 "support_rate": str(r.support_rate), "support_total": str(r.support_total),
                 "remainder": str(max(r.remainder, Decimal('0.00'))), "due_back": str(r.due_back),
+                "hourly_rate": str(r.hourly_rate),
                 "support_payouts": {n: str(a) for n, a in r.support_payouts.items()},
                 "tipped_payouts": {n: str(a) for n, a in r.tipped_payouts.items()},
                 "flags": r.flags,

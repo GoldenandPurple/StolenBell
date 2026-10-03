@@ -56,6 +56,12 @@ class Rules(unittest.TestCase):
         self.assertEqual(r.tipped_payouts, {})
         self.assertTrue(any("DUE BACK" in f for f in r.flags))
 
+    def test_hourly_rate_is_remainder_per_bar_server_hour(self):
+        r = compute_period("Dinner", period([{"name": "A", "role": "Server", "hours": 6},
+                                             {"name": "B", "role": "Bartender", "hours": 4}], card=1000))
+        self.assertEqual(r.hourly_rate, D("100.00"))
+        self.assertEqual(compute_period("Dinner", period([], card=0)).hourly_rate, D("0.00"))
+
     def test_split_reconciles_to_the_cent(self):
         r = compute_period("Dinner", period([{"name": n, "role": "Server", "hours": 1} for n in "ABC"], card=100))
         self.assertEqual(sorted(r.tipped_payouts.values()), [D("33.33"), D("33.33"), D("33.34")])

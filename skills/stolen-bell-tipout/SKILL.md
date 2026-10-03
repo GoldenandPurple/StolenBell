@@ -53,7 +53,8 @@ Call the Toast MCP server's **`get_tipout_inputs`** tool with the business date
 It does the bucketing for you:
 - **Card tips and auto-gratuity** go to Lunch or Dinner by when they were paid.
 - **Sales** go to the period the order was opened in. `gross_food_sales` is the
-  food-category items (pre-tax, after discounts); `net_sales` is all categories.
+  food-category items before discounts, as Toast reports gross sales; `net_sales` is all
+  categories after discounts. Both are pre-tax.
   `cash_sales` (cash payments, excluding tips) is only for the Cash Out form.
 - **Hours** come from clock-in/clock-out, split at the Lunch/Dinner boundary, with unpaid
   breaks removed. Time before Lunch starts counts toward neither period. Toast jobs are
@@ -89,11 +90,13 @@ cash) lands on a named person or the kitchen lump.
   python3 scripts/fill_cashout.py <input.json> --out CashOut_YYYY-MM-DD.xlsx --completed-by "<GM name>"
   ```
   This fills the yellow cells so Steph gets the same worksheet she uses now, with the form's
-  own formulas doing the arithmetic. It first checks that those formulas will land on the
-  engine's figures. If it exits with `problems` (two people in the same support role, more
-  staff than the form has rows, or a due back), **no form is written**. Show the problems and
+  own formulas doing the arithmetic, including each period's hourly rate for bar/servers
+  (remainder ÷ their hours). It first checks that those formulas will land on the engine's
+  figures. If it exits with `problems` (more staff than the form has rows, or a due back),
+  **no form is written**. Show the problems and
   give the GM the engine's payout table instead; don't fill the form by hand to force it.
-  The "Hourly rate (ref)" column is left blank.
+  Support rows get each person's role (Host or Barback); the form sets the support rate from
+  which roles worked.
 - State plainly that this is a draft to review and that **no one is paid and nothing is
   written back** until the GM acts on it outside this skill.
 
