@@ -1,4 +1,9 @@
+import { fileURLToPath } from 'node:url';
+
 export type Mode = 'demo' | 'live';
+
+/** config/tipout.yaml in the install folder, so it's found whatever folder the server is started from. */
+export const DEFAULT_TIPOUT_CONFIG_PATH = fileURLToPath(new URL('../config/tipout.yaml', import.meta.url));
 
 export interface AppConfig {
   mode: Mode;
@@ -27,7 +32,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const config: AppConfig = {
     mode,
     includeWages: env.TOAST_INCLUDE_WAGES?.toLowerCase() === 'true',
-    tipoutConfigPath: env.TIPOUT_CONFIG_PATH || 'config/tipout.yaml',
+    tipoutConfigPath: env.TIPOUT_CONFIG_PATH || DEFAULT_TIPOUT_CONFIG_PATH,
   };
   if (mode === 'demo') return config;
 

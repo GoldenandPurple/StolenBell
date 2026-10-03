@@ -8,7 +8,8 @@
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run && python3 -m unittest discover -s skills/stolen-bell-tipout/tests"
+    "test": "vitest run && python3 -m unittest discover -s skills/stolen-bell-tipout/tests",
+    "package:skill": "python3 scripts/package_skill.py"
   },
   "repository": {
     "type": "git",

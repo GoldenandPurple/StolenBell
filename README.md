@@ -8,6 +8,8 @@ A read-only [Model Context Protocol](https://modelcontextprotocol.io) server tha
 
 It only reads from Toast. It never changes anything in Toast or payroll.
 
+**Setting up the GM's computer?** Follow the [Windows setup guide](docs/SETUP-WINDOWS.md).
+
 ## Quick start (demo data, no Toast account needed)
 
 ```bash
@@ -25,7 +27,7 @@ Add it to an MCP client, e.g. Claude Desktop's `claude_desktop_config.json`:
     "toast": {
       "command": "node",
       "args": ["/absolute/path/to/StolenBell/dist/index.js"],
-      "env": { "TOAST_MCP_MODE": "demo", "TIPOUT_CONFIG_PATH": "/absolute/path/to/StolenBell/config/tipout.yaml" }
+      "env": { "TOAST_MCP_MODE": "demo" }
     }
   }
 }
