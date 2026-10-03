@@ -52,7 +52,10 @@ export interface TipoutInputs {
     timeZone: string;
     /** Where card tips and auto-gratuity came from, and how they compare with the other source. */
     tips: {
+      /** The source actually used (time_entries falls back to check_time when shifts carry no card tips). */
       source: string;
+      /** Card tips per period under each check-based method, for comparing with Toast's Tip Summary. */
+      cardTipsByMethod: Record<string, Record<Period, number>>;
       /** Shifts (or checks, for check-based sources) whose tips were shared between Lunch and Dinner. */
       spanningBothPeriods: { count: number; toLunch: number; toDinner: number };
       cardTipsOnShifts: Record<Period, number>;
@@ -197,6 +200,12 @@ export function buildTipoutInputs(day: DayData, ref: Reference, config: TipoutCo
   const useShifts = config.cardTipSource === 'time_entries';
   const checkMethod = useShifts ? 'check_time' : config.cardTipSource;
   const splitChecks = { count: 0, lunchCents: 0, dinnerCents: 0 };
+  // Card tips per period under every check-based method, so a real day can be compared with Toast's Tip Summary.
+  const byMethod: Record<'check_time' | 'check_items' | 'payment', Shares> = {
+    check_time: { Lunch: 0, Dinner: 0 },
+    check_items: { Lunch: 0, Dinner: 0 },
+    payment: { Lunch: 0, Dinner: 0 },
+  };
   let earlyTipCents = 0;
   let undatedTipCents = 0;
   let undatedOrders = 0;
@@ -244,6 +253,8 @@ export function buildTipoutInputs(day: DayData, ref: Reference, config: TipoutCo
           ? undefined
           : (checkMethod === 'check_items' ? itemShares(c.selections ?? [], checkStart, periodOf) : undefined) ??
             timeShares(checkStart, checkEnd, dinnerStart, periodOf);
+      const timeOpen = timeShares(checkStart, checkEnd, dinnerStart, periodOf);
+      const itemsRung = itemShares(c.selections ?? [], checkStart, periodOf) ?? timeOpen;
       const paidAt = (payment: (typeof payments)[number]) => parseInstant(payment.paidDate) ?? parseInstant(c.closedDate) ?? opened;
 
       const gratuity = (c.appliedServiceCharges ?? [])
@@ -274,6 +285,13 @@ export function buildTipoutInputs(day: DayData, ref: Reference, config: TipoutCo
         if (!tipShares) {
           undatedTipCents += tip;
           continue;
+        }
+        for (const [method, methodShares] of [
+          ['check_time', timeOpen],
+          ['check_items', itemsRung],
+          ['payment', paid === undefined ? undefined : oneHot(periodOf(paid))],
+        ] as const) {
+          if (methodShares) for (const [period, amount] of splitCents(tip, methodShares)) byMethod[method][period] += amount;
         }
         if ((checkEnd ?? paid ?? Infinity) < lunchStart) earlyTipCents += tip;
         checkCardTips += tip;
@@ -411,7 +429,18 @@ export function buildTipoutInputs(day: DayData, ref: Reference, config: TipoutCo
     Lunch: { card: acc.Lunch.cardTipCents, gratuity: acc.Lunch.gratuityCents },
     Dinner: { card: acc.Dinner.cardTipCents, gratuity: acc.Dinner.gratuityCents },
   };
-  if (useShifts) {
+  // Not every Toast setup records tips on shifts. If the shifts carry no card tips but the checks do,
+  // use the checks (shared by time open) rather than a $0 pool, and say so.
+  const shiftCardTotal = shiftTips.Lunch.card + shiftTips.Dinner.card + undatedShiftTipCents;
+  const checkCardTotal = checkTips.Lunch.card + checkTips.Dinner.card;
+  let sourceUsed: string = config.cardTipSource;
+  if (useShifts && shiftCardTotal === 0 && checkCardTotal > 0) {
+    sourceUsed = 'check_time';
+    check(
+      `Toast has no card tips on the shift records for this day, so card tips and auto-gratuity were taken from the checks ` +
+        `(a check open across 4:00 is shared by time open in each period). Compare details.tips.cardTipsByMethod with Toast's Tip Summary.`,
+    );
+  } else if (useShifts) {
     for (const period of PERIODS) {
       acc[period].cardTipCents = shiftTips[period].card;
       acc[period].gratuityCents = shiftTips[period].gratuity;
@@ -493,11 +522,14 @@ export function buildTipoutInputs(day: DayData, ref: Reference, config: TipoutCo
     details: {
       timeZone,
       tips: {
-        source: config.cardTipSource,
+        source: sourceUsed,
+        cardTipsByMethod: Object.fromEntries(
+          Object.entries(byMethod).map(([method, shares]) => [method, { Lunch: dollars(shares.Lunch), Dinner: dollars(shares.Dinner) }]),
+        ) as Record<string, Record<Period, number>>,
         spanningBothPeriods: {
-          count: (useShifts ? splitShifts : splitChecks).count,
-          toLunch: dollars((useShifts ? splitShifts : splitChecks).lunchCents),
-          toDinner: dollars((useShifts ? splitShifts : splitChecks).dinnerCents),
+          count: (sourceUsed === 'time_entries' ? splitShifts : splitChecks).count,
+          toLunch: dollars((sourceUsed === 'time_entries' ? splitShifts : splitChecks).lunchCents),
+          toDinner: dollars((sourceUsed === 'time_entries' ? splitShifts : splitChecks).dinnerCents),
         },
         cardTipsOnShifts: { Lunch: dollars(shiftTips.Lunch.card), Dinner: dollars(shiftTips.Dinner.card) },
         cardTipsOnChecks: { Lunch: dollars(checkTips.Lunch.card), Dinner: dollars(checkTips.Dinner.card) },

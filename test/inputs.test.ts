@@ -253,6 +253,20 @@ describe('buildTipoutInputs with tips from Toast shifts (default)', () => {
     expect(result.issues).toContainEqual({ severity: 'check', message: expect.stringMatching(/shifts total \$200\.50, but card tips on the day's checks total \$95\.00/) });
   });
 
+  it('falls back to the checks when Toast has no card tips on the shifts, instead of a $0 pool', () => {
+    const result = buildTipoutInputs(baseDay(), ref, shiftConfig, CASH); // base shifts carry no tips
+    expect(result.details.tips.source).toBe('check_time');
+    expect(result.input.periods.Lunch!.pool_card_tips).toBe(32.5);
+    expect(result.input.periods.Dinner!.pool_card_tips).toBe(62.5);
+    expect(result.issues).toContainEqual({ severity: 'check', message: expect.stringMatching(/no card tips on the shift records/) });
+    // All three check methods side by side, for comparing with Toast's Tip Summary.
+    expect(result.details.tips.cardTipsByMethod).toEqual({
+      check_time: { Lunch: 32.5, Dinner: 62.5 },
+      check_items: { Lunch: 35, Dinner: 60 }, // the test items have no times, so they count from when the check opened
+      payment: { Lunch: 25, Dinner: 70 },
+    });
+  });
+
   it("counts tips from shifts in jobs that aren't in the tip-out (e.g. a manager who took a table)", () => {
     const day = tipped();
     day.timeEntries.push(entry('e-sam1', 'j-som', at('18:00'), at('20:00'), { nonCashTips: 30 }));
