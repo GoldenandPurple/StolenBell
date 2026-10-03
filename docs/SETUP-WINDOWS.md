@@ -39,7 +39,7 @@ Node.js is what runs the Toast connection on this computer.
 ## 3. Download the Toast connection
 
 1. In a web browser, open the repository on GitHub: **https://github.com/goldenandpurple/StolenBell**.
-2. Use the branch dropdown (top left of the file list) to pick **`main`**. Until the work is merged, pick **`claude/epic-franklin-bqkcam`** instead.
+2. Make sure the branch dropdown (top left of the file list) says **`main`**.
 3. Click the green **Code** button, then **Download ZIP**.
 4. Open your **Downloads** folder, right-click the ZIP, and choose **Extract All…**.
 5. Move the extracted folder to **`C:\StolenBell`**, so that a file exists at `C:\StolenBell\package.json`.
