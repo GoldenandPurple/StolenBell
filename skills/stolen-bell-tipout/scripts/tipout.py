@@ -37,10 +37,24 @@ def _money(x) -> Decimal:
     return Decimal(str(x)).quantize(CENT, rounding=ROUND_HALF_UP)
 
 
+def _merge_by_name(people: list[dict]) -> list[dict]:
+    hours: dict[str, Decimal] = {}
+    for p in people:
+        hours[p["name"]] = hours.get(p["name"], Decimal("0")) + Decimal(str(p["hours"]))
+    return [{"name": n, "hours": h} for n, h in hours.items()]
+
+
+def _add(into: dict[str, Decimal], payouts: dict[str, Decimal]) -> None:
+    for name, amt in payouts.items():
+        into[name] = into.get(name, Decimal("0.00")) + amt
+
+
 def _split_by_hours(total: Decimal, people: list[dict]) -> dict[str, Decimal]:
     """Split `total` across people proportionate to hours, reconciled to the cent.
 
-    Largest-remainder method so the parts sum EXACTLY to `total`."""
+    Largest-remainder method so the parts sum EXACTLY to `total`. Someone listed
+    more than once (e.g. two time entries) gets one share for their summed hours."""
+    people = _merge_by_name(people)
     total_cents = int((total * 100).to_integral_value(rounding=ROUND_HALF_UP))
     hours = [Decimal(str(p["hours"])) for p in people]
     hsum = sum(hours)
@@ -82,6 +96,7 @@ def compute_period(period: str, data: dict) -> PeriodResult:
     net_sales = _money(data.get("net_sales", 0))
     staff = data.get("staff", [])
 
+    unknown = sorted({s["role"] for s in staff} - TIPPED_ROLES - SUPPORT_ROLES - {"Kitchen"})
     tipped = [s for s in staff if s["role"] in TIPPED_ROLES and Decimal(str(s["hours"])) > 0]
     support = [s for s in staff if s["role"] in SUPPORT_ROLES and Decimal(str(s["hours"])) > 0]
     roles_present = {s["role"] for s in support}
@@ -97,6 +112,8 @@ def compute_period(period: str, data: dict) -> PeriodResult:
     support_total = _money(net_sales * s_rate)
 
     flags = []
+    if unknown:
+        flags.append(f"Unknown role(s) {', '.join(unknown)} - those hours were left out. Map them to a known role.")
     # Kitchen and support are obligations, paid in full. The remainder is
     # whatever the pool has left for bar/servers. On card tips alone it is
     # reliably positive; a negative only arises once cash is in play, and
@@ -129,8 +146,8 @@ def compute_day(doc: dict) -> dict:
     results = [compute_period(name, pdata) for name, pdata in doc.get("periods", {}).items()]
     per_person: dict[str, Decimal] = {}
     for r in results:
-        for name, amt in {**r.support_payouts, **r.tipped_payouts}.items():
-            per_person[name] = per_person.get(name, Decimal("0.00")) + amt
+        _add(per_person, r.support_payouts)
+        _add(per_person, r.tipped_payouts)
     kitchen_lump = sum((r.kitchen for r in results), Decimal("0.00"))
     return {"date": doc.get("business_date"), "periods": results,
             "per_person": per_person, "kitchen_lump_total": kitchen_lump}
@@ -143,7 +160,7 @@ def format_report(day: dict) -> str:
             "", f"[{r.period}]",
             f"  Pool (card + cash)      ${r.pool:>10,.2f}",
             f"  Kitchen (10% food)      ${r.kitchen:>10,.2f}   -> lump, Chef splits",
-            f"  Support ({r.support_rate*100:g}% net)        ${r.support_total:>10,.2f}",
+            f"  {f'Support ({(r.support_rate * 100).normalize():f}% net)':<24}${r.support_total:>10,.2f}",
         ]
         if r.due_back > 0:
             lines.append(f"  Remainder (bar/servers) ${Decimal('0.00'):>10,.2f}   (DUE BACK ${r.due_back:,.2f})")

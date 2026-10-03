@@ -5,7 +5,11 @@ import { loadConfig } from '../src/config.js';
 import { ToastRepository } from '../src/data/repository.js';
 import { createServer } from '../src/server.js';
 import { DemoToastApi } from '../src/toast/demo.js';
-import { loadTipRules } from '../src/tipout/rules.js';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { loadTipoutConfig } from '../src/tipout/config.js';
 
 let client: Client;
 
@@ -16,11 +20,11 @@ async function call(name: string, args: Record<string, unknown> = {}) {
 }
 
 beforeAll(async () => {
-  const config = loadConfig({ TOAST_MCP_MODE: 'demo', TIP_RULES_PATH: 'config/tip-rules.yaml' });
+  const config = loadConfig({ TOAST_MCP_MODE: 'demo', TIPOUT_CONFIG_PATH: 'config/tipout.yaml' });
   const server = createServer({
     config,
     repo: new ToastRepository(new DemoToastApi()),
-    loadRules: () => loadTipRules(config.tipRulesPath),
+    loadTipoutConfig: () => loadTipoutConfig(config.tipoutConfigPath),
   });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
@@ -32,7 +36,7 @@ describe('MCP server (demo mode)', () => {
   it('lists the tools, all read-only', async () => {
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual(
-      ['calculate_tip_out', 'get_restaurant_setup', 'labor_report', 'list_staff', 'sales_report', 'tips_report', 'top_items'].sort(),
+      ['get_restaurant_setup', 'get_tipout_inputs', 'labor_report', 'list_staff', 'sales_report', 'tips_report', 'top_items'].sort(),
     );
     expect(tools.every((t) => t.annotations?.readOnlyHint)).toBe(true);
   });
@@ -41,31 +45,40 @@ describe('MCP server (demo mode)', () => {
     const { data } = await call('get_restaurant_setup');
     expect(data.dataSource).toMatch(/DEMO/);
     expect(data.jobs.map((j: { title: string }) => j.title)).toContain('Bartender');
-    expect(data.tipOutRules).toHaveLength(3);
+    expect(data.tipout.unmappedJobs).toEqual([]);
   });
 
-  it('calculates a tip-out where money is only moved, never created', async () => {
-    const { data } = await call('calculate_tip_out', { startDate: '2026-09-26' });
-    const sum = (key: string) => data.employees.reduce((total: number, e: Record<string, number>) => total + Math.round(e[key]! * 100), 0);
-    expect(sum('tipOutPaid')).toBe(sum('tipOutReceived'));
-    expect(sum('finalTips')).toBe(sum('tipsEarned'));
-    const cooks = data.employees.filter((e: { jobs: string[] }) => e.jobs.includes('Line Cook'));
-    expect(cooks.length).toBeGreaterThan(0);
-    expect(cooks.every((e: { tipOutReceived: number }) => e.tipOutReceived > 0)).toBe(true);
+  it('produces tip-out inputs the skill engine accepts, and the engine reconciles them', async () => {
+    const { data } = await call('get_tipout_inputs', { date: '2026-09-26' });
+    expect(data.ready).toBe(true);
+    expect(Object.keys(data.input.periods)).toEqual(['Lunch', 'Dinner']);
+    const dinnerRoles = new Set(data.input.periods.Dinner.staff.map((s: { role: string }) => s.role));
+    expect(dinnerRoles).toEqual(new Set(['Bartender', 'Server', 'Host', 'Barback', 'Kitchen'])); // Saturday: barback works
+    // Devon serves lunch and bartends dinner; Casey's shift crosses 16:00.
+    expect(data.input.periods.Lunch.staff).toContainEqual({ name: 'Devon Patel', role: 'Server', hours: 4.75 });
+    expect(data.input.periods.Dinner.staff).toContainEqual({ name: 'Devon Patel', role: 'Bartender', hours: 6 });
+    expect(data.input.periods.Lunch.staff).toContainEqual({ name: 'Casey Morales', role: 'Bartender', hours: 1 });
+    expect(data.input.periods.Dinner.staff).toContainEqual({ name: 'Casey Morales', role: 'Bartender', hours: 8 });
+
+    const file = join(mkdtempSync(join(tmpdir(), 'tipout-')), 'input.json');
+    writeFileSync(file, JSON.stringify(data.input));
+    const out = JSON.parse(execFileSync('python3', ['skills/stolen-bell-tipout/scripts/tipout.py', file, '--json'], { encoding: 'utf8' }));
+    const cents = (v: string) => Math.round(Number(v) * 100);
+    const paid = Object.values(out.per_person as Record<string, string>).reduce((sum, v) => sum + cents(v), 0) + cents(out.kitchen_lump_total);
+    const pool = Math.round((data.input.periods.Lunch.pool_card_tips + data.input.periods.Dinner.pool_card_tips) * 100);
+    expect(out.periods.every((p: { flags: string[] }) => p.flags.length === 0)).toBe(true);
+    expect(paid).toBe(pool);
   });
 
-  it('runs a what-if with rules passed in', async () => {
-    const { data } = await call('calculate_tip_out', {
-      startDate: '2026-09-26',
-      rules: [{ name: 'Everyone pools', from: ['Server', 'Bartender'], to: ['Server', 'Bartender', 'Busser'], basis: 'tips', percent: 100 }],
-    });
-    expect(data.scenario).toMatch(/What-if/);
-    expect(Object.keys(data.ruleTotals)).toEqual(['Everyone pools']);
+  it('uses the lower support rate on a weekday with no barback', async () => {
+    const { data } = await call('get_tipout_inputs', { date: '2026-09-22' });
+    const roles = data.input.periods.Dinner.staff.map((s: { role: string }) => s.role);
+    expect(roles).not.toContain('Barback');
   });
 
-  it('settles multi-day ranges per day', async () => {
-    const { data } = await call('calculate_tip_out', { startDate: '2026-09-21', endDate: '2026-09-27' });
-    expect(data.days).toHaveLength(7);
+  it('rejects a malformed date', async () => {
+    const result = await call('get_tipout_inputs', { date: '26/09/2026' });
+    expect(result.isError).toBe(true);
   });
 
   it('reports sales that reconcile across groupings', async () => {

@@ -1,16 +1,17 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { AppConfig } from './config.js';
-import { MAX_RANGE_DAYS } from './data/dates.js';
+import { businessDates, MAX_RANGE_DAYS } from './data/dates.js';
 import type { ToastRepository } from './data/repository.js';
-import { describeRule, laborReport, salesReport, tipOutReport, tipsReport, topItemsReport } from './reports.js';
-import { TipRuleSchema, TipSourcesSchema, type TipRulesFile } from './tipout/rules.js';
+import { laborReport, salesReport, tipsReport, topItemsReport } from './reports.js';
+import type { TipoutConfig } from './tipout/config.js';
+import { buildTipoutInputs } from './tipout/inputs.js';
 
 export interface ServerDeps {
   config: AppConfig;
   repo: ToastRepository;
-  /** Re-read on every call so edits to the rules file apply without a restart. */
-  loadRules: () => Promise<TipRulesFile>;
+  /** Re-read on every call so edits to the tip-out config apply without a restart. */
+  loadTipoutConfig: () => Promise<TipoutConfig>;
 }
 
 const dateRange = {
@@ -42,7 +43,7 @@ const guard =
     }
   };
 
-export function createServer({ config, repo, loadRules }: ServerDeps): McpServer {
+export function createServer({ config, repo, loadTipoutConfig }: ServerDeps): McpServer {
   const server = new McpServer({ name: 'toast-staff', version: '0.1.0' });
   const dataNote = config.mode === 'demo' ? 'SYNTHETIC DEMO DATA — not a real restaurant.' : undefined;
   const withNote = (data: object) => (dataNote ? { dataSource: dataNote, ...data } : data);
@@ -52,19 +53,25 @@ export function createServer({ config, repo, loadRules }: ServerDeps): McpServer
     {
       title: 'Restaurant setup',
       description:
-        'Restaurant name, time zone, job titles, sales categories, revenue centers and the configured tip-out rules. Call this first to learn the exact job and category names other tools use.',
+        'Restaurant name, time zone, job titles, sales categories, revenue centers, and how jobs map onto tip-out roles. Call this first to learn the exact job and category names other tools use.',
       annotations: readOnly,
     },
     guard(async () => {
-      const [ref, rules] = await Promise.all([repo.reference(), loadRules()]);
+      const [ref, tipout] = await Promise.all([repo.reference(), loadTipoutConfig()]);
       return withNote({
         mode: config.mode,
         restaurant: ref.restaurant.general ?? {},
         jobs: [...ref.jobs.values()].map((job) => ({ title: job.title, tipped: job.tipped })),
         salesCategories: [...new Set(ref.salesCategories.values())],
         revenueCenters: [...new Set(ref.revenueCenters.values())],
-        tipSources: rules.tipSources,
-        tipOutRules: rules.rules.map(describeRule),
+        tipout: {
+          periods: tipout.periods,
+          foodCategories: tipout.foodCategories,
+          roles: tipout.roles,
+          unmappedJobs: [...ref.jobs.values()]
+            .map((job) => job.title)
+            .filter((title) => !Object.keys(tipout.roles).some((job) => job.toLowerCase() === title.toLowerCase())),
+        },
         wagesVisible: config.includeWages,
       });
     }),
@@ -151,56 +158,26 @@ export function createServer({ config, repo, loadRules }: ServerDeps): McpServer
   );
 
   server.registerTool(
-    'calculate_tip_out',
+    'get_tipout_inputs',
     {
-      title: 'Calculate tip-out',
+      title: 'Tip-out inputs',
       description:
-        "Calculates tip-outs and tip pools using the restaurant's configured rules (or rules passed in to try a what-if scenario). " +
-        'Each business day is settled separately, then totalled per employee. Shows what each person earned, paid out, received and takes home. ' +
-        'This only calculates; it never changes anything in Toast or payroll.',
+        'Pulls everything the Stolen Bell tip-out needs for one business day, split into Lunch and Dinner: card tips by when they were paid, ' +
+        'food and net sales by when the order was opened, and each person\'s hours by tip-out role, split at the period boundary with unpaid breaks removed. ' +
+        '`input` is the exact document the tip-out engine (skills/stolen-bell-tipout/scripts/tipout.py) reads. ' +
+        'If `ready` is false, an issue with severity "stop" must be resolved by a person before running the engine; never estimate around it. ' +
+        'This tool does not calculate payouts.',
       inputSchema: {
-        ...dateRange,
-        rules: z
-          .array(TipRuleSchema)
-          .optional()
-          .describe('Override the configured rules for a what-if scenario. Job titles must match get_restaurant_setup.'),
-        tipSources: TipSourcesSchema.optional().describe('Override which tip types count as earned tips'),
+        date: z.string().describe('Business date, YYYY-MM-DD'),
+        cashLunch: z.number().min(0).optional().describe('Cash the GM is adding to the Lunch pool. Leave out for none.'),
+        cashDinner: z.number().min(0).optional().describe('Cash the GM is adding to the Dinner pool. Leave out for none.'),
       },
-      annotations: { ...readOnly, idempotentHint: true },
+      annotations: readOnly,
     },
-    guard(async (args: { startDate: string; endDate?: string | undefined; rules?: z.infer<typeof TipRuleSchema>[] | undefined; tipSources?: z.infer<typeof TipSourcesSchema> | undefined }) => {
-      const configured = await loadRules();
-      const rules = args.rules ?? configured.rules;
-      if (rules.length === 0) {
-        throw new Error(
-          `No tip-out rules are configured (looked in ${config.tipRulesPath}). Add rules there, or pass rules to this tool.`,
-        );
-      }
-      const report = await tipOutReport(repo, args, rules, args.tipSources ?? configured.tipSources);
-      return withNote({ ...(args.rules ? { scenario: 'What-if: using rules passed in, not the configured rules' } : {}), ...report });
-    }),
-  );
-
-  server.registerPrompt(
-    'nightly_tip_out',
-    {
-      title: 'Nightly tip-out sheet',
-      description: "Produce tonight's tip-out sheet for the closing manager.",
-      argsSchema: { date: z.string().describe('Business date, YYYY-MM-DD') },
-    },
-    ({ date }) => ({
-      messages: [
-        {
-          role: 'user',
-          content: {
-            type: 'text',
-            text:
-              `Run calculate_tip_out for ${date}. Present a table with each employee, their job, hours, tips earned, ` +
-              'tip-out paid, tip-out received and final tips, sorted by job. Then list the pot for each rule. ' +
-              'Call out anyone still clocked in and any warnings before the table, because those make the numbers provisional.',
-          },
-        },
-      ],
+    guard(async ({ date, cashLunch, cashDinner }: { date: string; cashLunch?: number | undefined; cashDinner?: number | undefined }) => {
+      const [businessDate] = businessDates(date);
+      const [ref, day, tipout] = await Promise.all([repo.reference(), repo.day(businessDate!), loadTipoutConfig()]);
+      return withNote(buildTipoutInputs(day, ref, tipout, { Lunch: cashLunch, Dinner: cashDinner }));
     }),
   );
 

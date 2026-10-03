@@ -1,0 +1,30 @@
+# How Toast data is mapped onto the Stolen Bell tip-out.
+# The tip-out math lives in skills/stolen-bell-tipout/scripts/tipout.py; this file only
+# controls how the MCP server buckets Toast data for it. Changes apply on the next run.
+
+# Service periods, restaurant local time. Lunch runs lunchStart–dinnerStart; Dinner runs
+# dinnerStart–close (after midnight still counts as Dinner). Hours before lunchStart count
+# toward neither period.
+periods:
+  lunchStart: "11:00"
+  dinnerStart: "16:00"
+
+# Toast sales categories that count as food for the kitchen's 10%.
+foodCategories:
+  - Food
+
+# Toast job title -> tip-out role. Roles: Bartender, Server, Host, Barback, Kitchen,
+# or "ignore" to leave a job out entirely. Any job not listed stops the run so it can be
+# mapped deliberately rather than guessed.
+roles:
+  Bartender: Bartender
+  Server: Server
+  Host: Host
+  Barback: Barback
+  Chef: Kitchen
+  Line Cook: Kitchen
+  Dishwasher: Kitchen
+  Manager: ignore
+
+# Optional: override the restaurant time zone from Toast (IANA name, e.g. America/Vancouver).
+# timeZone: America/Vancouver

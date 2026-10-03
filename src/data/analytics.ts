@@ -1,5 +1,3 @@
-import type { StaffDay } from '../tipout/engine.js';
-import type { TipSources } from '../tipout/rules.js';
 import type { ToastOrder, ToastPayment, ToastTimeEntry } from '../toast/types.js';
 import { isoFromBusinessDate } from './dates.js';
 import type { DayData, Reference } from './repository.js';
@@ -26,7 +24,7 @@ export interface OrderFacts {
   items: { name: string; quantity: number; netSalesCents: number }[];
 }
 
-function paymentCounts(payment: ToastPayment): boolean {
+export function paymentCounts(payment: ToastPayment): boolean {
   return !VOID_PAYMENT_STATUSES.has((payment.paymentStatus ?? '').toUpperCase()) && !payment.voidInfo;
 }
 
@@ -91,59 +89,17 @@ export function jobTitle(ref: Reference, entry: ToastTimeEntry): string {
 
 export const entryHours = (entry: ToastTimeEntry) => (entry.regularHours ?? 0) + (entry.overtimeHours ?? 0);
 
-export function entryTipsCents(entry: ToastTimeEntry, sources: TipSources): number {
+/** Card tips + declared cash tips + gratuity service charges on one time entry. */
+export function entryTipsCents(entry: ToastTimeEntry): number {
   return (
-    (sources.cardTips ? cents(entry.nonCashTips) : 0) +
-    (sources.declaredCashTips ? cents(entry.declaredCashTips) : 0) +
-    (sources.gratuities ? cents(entry.cashGratuityServiceCharges) + cents(entry.nonCashGratuityServiceCharges) : 0)
+    cents(entry.nonCashTips) +
+    cents(entry.declaredCashTips) +
+    cents(entry.cashGratuityServiceCharges) +
+    cents(entry.nonCashGratuityServiceCharges)
   );
 }
 
 export const liveEntries = (day: DayData) => day.timeEntries.filter((entry) => !entry.deleted);
-
-/**
- * Builds the per-employee inputs to the tip-out engine for one business day.
- * Hours and tips come from time entries (so they are attributed to the job
- * worked); sales come from orders where the employee is the server.
- */
-export function buildStaffDays(day: DayData, ref: Reference, sources: TipSources): StaffDay[] {
-  const staff = new Map<string, StaffDay>();
-  const get = (guid: string) => {
-    let member = staff.get(guid);
-    if (!member) {
-      member = { employeeGuid: guid, name: staffName(ref, guid), roles: [], netSalesCents: 0, salesByCategoryCents: {}, tipsCents: 0 };
-      staff.set(guid, member);
-    }
-    return member;
-  };
-
-  for (const entry of liveEntries(day)) {
-    const guid = entry.employeeReference?.guid;
-    if (!guid) continue;
-    const member = get(guid);
-    const job = jobTitle(ref, entry);
-    const role = member.roles.find((existing) => existing.job === job);
-    if (role) role.hours += entryHours(entry);
-    else member.roles.push({ job, hours: entryHours(entry) });
-    member.tipsCents += entryTipsCents(entry, sources);
-  }
-
-  for (const order of day.orders) {
-    const facts = orderFacts(order, ref);
-    // Sales only count toward someone who clocked in that day; anything else stays unassigned.
-    if (!facts?.serverGuid || !staff.has(facts.serverGuid)) continue;
-    const member = staff.get(facts.serverGuid)!;
-    member.netSalesCents += facts.netSalesCents;
-    for (const [category, amount] of Object.entries(facts.salesByCategoryCents)) {
-      member.salesByCategoryCents[category] = (member.salesByCategoryCents[category] ?? 0) + amount;
-    }
-  }
-
-  for (const member of staff.values()) {
-    for (const role of member.roles) role.hours = Math.round(role.hours * 100) / 100;
-  }
-  return [...staff.values()];
-}
 
 /** Employees still clocked in (no clock-out) on the given days — their hours and tips are incomplete. */
 export function openShifts(days: DayData[], ref: Reference): string[] {

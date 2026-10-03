@@ -2,8 +2,7 @@
 
 A read-only [Model Context Protocol](https://modelcontextprotocol.io) server that sits on top of the Toast POS API, so staff and managers can ask an AI assistant (Claude Desktop, Claude Code, or any MCP client) things like:
 
-- "Run tonight's tip-out."
-- "What would the tip-out have been last week if the kitchen got 3% of sales instead of 5% of tips?"
+- "Run tip-out for yesterday." (with the Stolen Bell tip-out skill)
 - "Sales by server for Friday and Saturday."
 - "Who's still clocked in?" / "Hours by job this pay period."
 
@@ -26,78 +25,52 @@ Add it to an MCP client, e.g. Claude Desktop's `claude_desktop_config.json`:
     "toast": {
       "command": "node",
       "args": ["/absolute/path/to/StolenBell/dist/index.js"],
-      "env": { "TOAST_MCP_MODE": "demo", "TIP_RULES_PATH": "/absolute/path/to/StolenBell/config/tip-rules.yaml" }
+      "env": { "TOAST_MCP_MODE": "demo", "TIPOUT_CONFIG_PATH": "/absolute/path/to/StolenBell/config/tipout.yaml" }
     }
   }
 }
 ```
 
-Demo mode serves a made-up restaurant with servers, bartenders, bussers, a host and a kitchen. Every response is labelled as demo data.
+Demo mode serves a made-up restaurant shaped like Stolen Bell: lunch and dinner service with bartenders, servers, hosts, a barback on weekends, and a kitchen. Every response is labelled as demo data.
 
 ## Tools
 
 | Tool | What it does |
 | --- | --- |
-| `get_restaurant_setup` | Restaurant info, job titles, sales categories, revenue centers and the tip-out rules in effect. |
+| `get_restaurant_setup` | Restaurant info, job titles, sales categories, revenue centers, and how jobs map onto tip-out roles (including any job not yet mapped). |
 | `list_staff` | Employees and the jobs they can clock in as. Returns no wages or contact details. |
 | `sales_report` | Net sales, discounts, tax, tips, gratuities, guests and checks, by `total`, `day`, `server`, `revenue_center` or `sales_category`. |
 | `top_items` | Best-selling menu items by net sales. |
 | `labor_report` | Regular and overtime hours and shift counts by employee, job or day, plus who is still clocked in. |
 | `tips_report` | Tips per employee and job before tip-outs: card tips, declared cash tips and auto-gratuities, plus tips per hour. |
-| `calculate_tip_out` | Applies the tip-out rules per business day and totals each person's earned, paid out, received and final tips. Accepts `rules` for what-if scenarios. |
-
-There is also a `nightly_tip_out` prompt that produces a closing manager's tip-out sheet.
+| `get_tipout_inputs` | Everything the Stolen Bell tip-out needs for one day, split into Lunch and Dinner, plus a list of problems that must be fixed before paying anyone. Does not calculate payouts. |
 
 Dates are Toast business dates (`YYYY-MM-DD`). A range can be up to 31 days.
 
-## Tip-out rules
+## Tip-out
 
-Rules live in [`config/tip-rules.yaml`](config/tip-rules.yaml). The file is re-read on every calculation, so edits apply straight away. Each rule says who pays (`from`), who shares (`to`), how much and on what basis:
+The tip-out is split between two pieces so the rules live in exactly one place:
 
-```yaml
-rules:
-  - name: Bar tip-out            # servers give bartenders 5% of alcohol sales
-    from: [Server]
-    to: [Bartender]
-    basis: sales
-    salesCategories: [Liquor, Beer, Wine]
-    percent: 5
-    capAtTips: true
+1. **This server's `get_tipout_inputs` tool** pulls the day from Toast and buckets it into Lunch and Dinner.
+2. **The [Stolen Bell tip-out skill](skills/stolen-bell-tipout/SKILL.md)** feeds that into its engine, [`scripts/tipout.py`](skills/stolen-bell-tipout/scripts/tipout.py), which applies the house rules: card-tip pool, 10% of food sales to the kitchen, 2.25% / 1.5% of net sales to Host and Barback, and the remainder to Bartenders and Servers by hours. The skill then shows the GM a draft payout sheet to approve.
 
-  - name: Kitchen                # 5% of tips to the kitchen, split by hours
-    from: [Server, Bartender]
-    to: [Line Cook, Dishwasher]
-    basis: tips
-    percent: 5
+To change the **rules**, edit `tipout.py` (and its tests). To change how **Toast data is mapped**, edit [`config/tipout.yaml`](config/tipout.yaml):
 
-  - name: FOH pool               # a pool: from and to overlap
-    from: [Server, Bartender]
-    to: [Server, Bartender, Busser]
-    basis: remaining_tips
-    percent: 100
-    points: { Busser: 0.5 }
-```
-
-| Field | Meaning |
+| Setting | Meaning |
 | --- | --- |
-| `basis` | `sales` = the contributor's net sales (optionally only `salesCategories`); `tips` = tips they earned; `remaining_tips` = what they still hold after earlier rules. |
-| `split` | `hours` (default) shares by hours worked in a `to` job; `equal` gives one share per person. |
-| `points` | Weights per recipient job, e.g. a host at half a share. |
-| `capAtTips` | Never take more than the contributor currently holds. Without it, a sales-based rule can leave someone negative; that is reported as a warning. |
-| `tipSources` | Top-level setting for which tip types count as earned tips: `cardTips`, `declaredCashTips`, `gratuities`. |
+| `periods.lunchStart`, `periods.dinnerStart` | Lunch runs 11:00–16:00 and Dinner 16:00–close, in restaurant local time. After midnight still counts as Dinner. Hours before 11:00 count toward neither period. |
+| `foodCategories` | Toast sales categories that count as food for the kitchen's share. |
+| `roles` | Toast job title → `Bartender`, `Server`, `Host`, `Barback`, `Kitchen`, or `ignore`. A job that isn't listed stops the run, so it gets mapped on purpose rather than guessed. |
+| `timeZone` | Optional override if Toast doesn't return the restaurant's time zone. |
 
-How the calculation works:
+How `get_tipout_inputs` buckets the day:
 
-- Rules run in file order, once per business day; a multi-day range is settled day by day and then totalled.
-- Money is handled in whole cents. Pots are divided by the largest-remainder method, so payouts always add up to the pot exactly.
-- If nobody worked a `to` job that day, that rule collects nothing and the report says so.
-- Job titles and categories are matched case-insensitively against the names in Toast. Run `get_restaurant_setup` to see them.
+- **Card tips**: every non-cash payment's tip, in the period it was paid (payment time, falling back to check close time). Cash tips aren't pooled unless the GM passes `cashLunch` / `cashDinner`. The amount Toast recorded is shown for reference.
+- **Sales**: non-voided items on non-voided checks, in the period the order was opened. Food is the net price of items in `foodCategories`; net sales is every category. Both are pre-tax and after discounts.
+- **Hours**: from clock-in to clock-out, split at the period boundary, minus unpaid breaks. Several time entries for the same person and role are combined.
+- **It stops (`ready: false`)** on anything a person needs to resolve: an open shift, an unmapped job, tips or orders without a time, a period with sales but $0 card tips, or no matching food category. Smaller things, such as hours before 11:00 or cash tips seen in Toast, come back as `check` issues to show the GM.
 
-### Where the numbers come from
-
-- **Hours and tips** come from Toast **time entries** (Labor API), so they belong to the job the person clocked in as. Card tips are `nonCashTips`, cash tips are `declaredCashTips`, and gratuities are the gratuity service-charge fields.
-- **Sales** come from **orders**: the net price of non-voided items on non-voided checks, credited to the order's server. A sale only counts toward someone's tip-out if they clocked in that day. If someone worked two jobs in one day, all of their sales count toward any rule they pay into.
-- If anyone is still clocked in, the report lists them. Their hours and tips are incomplete until they clock out.
+The skill's engine is tested with `python3 -m unittest discover -s skills/stolen-bell-tipout/tests`; `npm test` runs it alongside the server tests, including a test that runs the engine on the server's own output and checks every dollar of the pool is paid out.
 
 ## Live mode (your Toast account)
 
@@ -114,7 +87,7 @@ TOAST_RESTAURANT_GUID=...
 
 The client logs in with Toast's machine-client flow, caches the token, spaces out requests, retries `429` and `5xx` responses (honouring `Retry-After`), and pages through `ordersBulk`. Responses are cached for 5 minutes (reference data for 10), so follow-up questions are quick.
 
-> **Status:** the Toast calls follow Toast's published API and are covered by tests against a fake HTTP layer, but they have not yet been run against a live Toast account. Before relying on it, compare the first few nights of results with Toast's own Labor and Sales Summary reports.
+> **Status:** the Toast calls follow Toast's published API and are covered by tests against a fake HTTP layer, but they have not yet been run against a live Toast account. The tip-out relies on payment times (`paidDate`), order open times (`openedDate`) and time-entry `breaks`; if Toast leaves any of those out, the tool stops rather than guessing. Before relying on it, compare the first few nights with Toast's own Labor and Sales Summary reports and with a hand-calculated tip-out.
 
 ## Privacy and access
 
@@ -129,13 +102,17 @@ The client logs in with Toast's machine-client flow, caches the token, spaces ou
 src/
   index.ts            stdio entry point
   server.ts           MCP tool and prompt definitions
-  reports.ts          sales / labor / tips / tip-out report builders
-  tipout/engine.ts    tip-out calculation (pure, cents-based)
-  tipout/rules.ts     rules file schema and loader
-  data/               Toast data caching, aggregation, date helpers
+  reports.ts          sales / labor / tips report builders
+  tipout/inputs.ts    buckets a Toast day into the tip-out skill's Lunch/Dinner input
+  tipout/config.ts    tip-out mapping config schema and loader
+  data/               Toast data caching, aggregation, date and time-zone helpers
   toast/client.ts     Toast API client (live)
   toast/demo.ts       synthetic demo restaurant
-config/tip-rules.yaml house tip-out rules
+config/tipout.yaml    Toast job / category / period mapping for the tip-out
+skills/stolen-bell-tipout/
+  SKILL.md            the GM-facing tip-out workflow
+  scripts/tipout.py   the tip-out rules (single source of truth)
+  tests/              engine tests
 test/                 vitest suites
 ```
 

@@ -3,7 +3,7 @@ export type Mode = 'demo' | 'live';
 export interface AppConfig {
   mode: Mode;
   includeWages: boolean;
-  tipRulesPath: string;
+  tipoutConfigPath: string;
   toast?: {
     accessUrl: string;
     clientId: string;
@@ -27,7 +27,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const config: AppConfig = {
     mode,
     includeWages: env.TOAST_INCLUDE_WAGES?.toLowerCase() === 'true',
-    tipRulesPath: env.TIP_RULES_PATH || 'config/tip-rules.yaml',
+    tipoutConfigPath: env.TIPOUT_CONFIG_PATH || 'config/tipout.yaml',
   };
   if (mode === 'demo') return config;
 

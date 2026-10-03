@@ -1,35 +1,39 @@
+import { zonedTimeToUtc } from '../data/zoned.js';
 import type { ToastDataApi } from './client.js';
 import type { ToastEmployee, ToastJob, ToastOrder, ToastSelection, ToastTimeEntry } from './types.js';
 
 /**
  * Deterministic synthetic restaurant used when TOAST_MCP_MODE=demo.
- * The same business date always produces the same data.
+ * The same business date always produces the same data. Shaped like Stolen
+ * Bell: lunch and dinner service, Bartender/Server/Host/Barback front of house.
  */
+
+const TIME_ZONE = 'America/Vancouver';
 
 const JOBS: ToastJob[] = [
   { guid: 'job-server', title: 'Server', tipped: true },
   { guid: 'job-bartender', title: 'Bartender', tipped: true },
-  { guid: 'job-busser', title: 'Busser', tipped: true },
+  { guid: 'job-barback', title: 'Barback', tipped: true },
   { guid: 'job-host', title: 'Host', tipped: true },
+  { guid: 'job-chef', title: 'Chef', tipped: false },
   { guid: 'job-cook', title: 'Line Cook', tipped: false },
   { guid: 'job-dish', title: 'Dishwasher', tipped: false },
 ];
 
-const STAFF: [guid: string, first: string, last: string, job: string, wage: number][] = [
-  ['emp-01', 'Avery', 'Chen', 'job-server', 17.4],
-  ['emp-02', 'Jordan', 'Patel', 'job-server', 17.4],
-  ['emp-03', 'Sam', 'Okafor', 'job-server', 17.4],
-  ['emp-04', 'Riley', 'Nguyen', 'job-server', 17.4],
-  ['emp-05', 'Casey', 'Morales', 'job-bartender', 18],
-  ['emp-06', 'Drew', 'Lindqvist', 'job-bartender', 18],
-  ['emp-07', 'Jamie', 'Fraser', 'job-busser', 17.4],
-  ['emp-08', 'Quinn', 'Adeyemi', 'job-busser', 17.4],
-  ['emp-09', 'Morgan', 'Reyes', 'job-host', 17.4],
-  ['emp-10', 'Taylor', 'Kowalski', 'job-cook', 21],
-  ['emp-11', 'Alex', 'Haddad', 'job-cook', 22.5],
-  ['emp-12', 'Charlie', 'Brooks', 'job-cook', 21],
-  ['emp-13', 'Rowan', 'Singh', 'job-dish', 17.4],
-];
+const STAFF: Record<string, [first: string, last: string, jobs: string[], wage: number]> = {
+  'emp-01': ['Mara', 'Chen', ['job-bartender'], 18],
+  'emp-02': ['Devon', 'Patel', ['job-server', 'job-bartender'], 17.4],
+  'emp-03': ['Sam', 'Okafor', ['job-server'], 17.4],
+  'emp-04': ['Riley', 'Nguyen', ['job-server'], 17.4],
+  'emp-05': ['Casey', 'Morales', ['job-bartender'], 18],
+  'emp-06': ['Priya', 'Lindqvist', ['job-host'], 17.4],
+  'emp-07': ['Jamie', 'Fraser', ['job-host'], 17.4],
+  'emp-08': ['Tomas', 'Adeyemi', ['job-barback'], 17.4],
+  'emp-09': ['Luis', 'Reyes', ['job-chef'], 26],
+  'emp-10': ['Taylor', 'Kowalski', ['job-cook'], 21],
+  'emp-11': ['Alex', 'Haddad', ['job-cook'], 21],
+  'emp-12': ['Rowan', 'Singh', ['job-dish'], 17.4],
+};
 
 const CATEGORIES = [
   { guid: 'cat-food', name: 'Food' },
@@ -42,7 +46,6 @@ const CATEGORIES = [
 const REVENUE_CENTERS = [
   { guid: 'rc-dining', name: 'Dining Room' },
   { guid: 'rc-bar', name: 'Bar' },
-  { guid: 'rc-patio', name: 'Patio' },
 ];
 
 const MENU: [name: string, price: number, category: string][] = [
@@ -62,6 +65,29 @@ const MENU: [name: string, price: number, category: string][] = [
   ['Sparkling Water', 5, 'cat-na'],
 ];
 
+/** [employee, job, start, end, unpaid break start (optional)] in local HH:MM; an end before the start means after midnight. */
+type Shift = [employee: string, job: string, start: string, end: string, breakAt?: string];
+
+function schedule(weekend: boolean): Shift[] {
+  return [
+    // Lunch
+    ['emp-01', 'job-bartender', '10:45', '16:15'],
+    ['emp-02', 'job-server', '11:00', '15:45'],
+    ['emp-06', 'job-host', '11:00', '15:00'],
+    ['emp-10', 'job-cook', '10:00', '16:00'],
+    // Dinner (Devon doubles as a bartender; Casey's shift crosses 16:00)
+    ['emp-02', 'job-bartender', '17:00', '23:00'],
+    ['emp-05', 'job-bartender', '15:00', '00:30', '19:30'],
+    ['emp-03', 'job-server', '16:00', '23:00', '19:00'],
+    ['emp-04', 'job-server', '16:30', '22:30'],
+    ['emp-07', 'job-host', '16:30', '21:30'],
+    ...(weekend ? ([['emp-08', 'job-barback', '17:00', '23:30']] as Shift[]) : []),
+    ['emp-09', 'job-chef', '14:00', '23:00'],
+    ['emp-11', 'job-cook', '16:00', '23:00'],
+    ['emp-12', 'job-dish', '17:00', '00:00'],
+  ];
+}
+
 /** Mulberry32: tiny seeded PRNG so demo days are reproducible. */
 function rng(seed: number) {
   let state = seed >>> 0;
@@ -75,109 +101,115 @@ function rng(seed: number) {
 }
 
 const money = (value: number) => Math.round(value * 100) / 100;
+const toastTime = (instant: number) => new Date(instant).toISOString().replace('Z', '+0000');
 
-interface DemoDay {
-  timeEntries: ToastTimeEntry[];
-  orders: ToastOrder[];
-}
-
-function buildDay(businessDate: string): DemoDay {
+function buildDay(businessDate: string): { timeEntries: ToastTimeEntry[]; orders: ToastOrder[] } {
   const random = rng(Number(businessDate));
   const pick = <T>(items: T[]) => items[Math.floor(random() * items.length)]!;
-  const shuffle = <T>(items: T[]) => [...items].sort(() => random() - 0.5);
-  const byJob = (job: string) => STAFF.filter((member) => member[3] === job);
-  const weekend = [5, 6].includes(new Date(`${businessDate.slice(0, 4)}-${businessDate.slice(4, 6)}-${businessDate.slice(6, 8)}T12:00:00Z`).getUTCDay());
-
-  const working = [
-    ...shuffle(byJob('job-server')).slice(0, weekend ? 4 : 3),
-    ...shuffle(byJob('job-bartender')).slice(0, weekend ? 2 : 1),
-    ...shuffle(byJob('job-busser')).slice(0, weekend ? 2 : 1),
-    ...byJob('job-host'),
-    ...shuffle(byJob('job-cook')).slice(0, weekend ? 3 : 2),
-    ...byJob('job-dish'),
-  ];
+  const iso = `${businessDate.slice(0, 4)}-${businessDate.slice(4, 6)}-${businessDate.slice(6, 8)}`;
+  const weekend = [5, 6].includes(new Date(`${iso}T12:00:00Z`).getUTCDay());
+  const at = (hhmm: string, after?: number) => {
+    const instant = zonedTimeToUtc(iso, hhmm, TIME_ZONE);
+    return after !== undefined && instant <= after ? instant + 86_400_000 : instant;
+  };
 
   const orders: ToastOrder[] = [];
-  const tips = new Map<string, { card: number; cash: number }>();
-  let orderNumber = 0;
-  for (const [guid, , , job] of working) {
-    if (job !== 'job-server' && job !== 'job-bartender') continue;
-    const tally = { card: 0, cash: 0 };
-    const orderCount = (job === 'job-server' ? 9 : 14) + Math.floor(random() * 6) + (weekend ? 4 : 0);
-    for (let i = 0; i < orderCount; i += 1) {
-      orderNumber += 1;
-      const guests = job === 'job-server' ? 1 + Math.floor(random() * 4) : 1 + Math.floor(random() * 2);
-      const selections: ToastSelection[] = [];
-      const lines = guests + Math.floor(random() * (guests + 2));
-      for (let line = 0; line < lines; line += 1) {
-        const [displayName, price, category] = job === 'job-bartender' && random() < 0.7
-          ? pick(MENU.filter(([, , cat]) => cat !== 'cat-food'))
-          : pick(MENU);
-        const discounted = random() < 0.05;
-        selections.push({
-          displayName,
-          quantity: 1,
-          preDiscountPrice: price,
-          price: discounted ? money(price * 0.8) : price,
-          voided: random() < 0.02,
-          salesCategory: { guid: category },
+  const timeEntries: ToastTimeEntry[] = [];
+
+  schedule(weekend).forEach(([employee, job, start, end, breakAt], index) => {
+    const clockIn = at(start);
+    const clockOut = at(end, clockIn);
+    const breakStart = breakAt ? at(breakAt, clockIn) : undefined;
+    const breakMs = breakStart ? 30 * 60_000 : 0;
+    const hours = money((clockOut - clockIn - breakMs) / 3_600_000);
+    const regularHours = Math.min(hours, 8);
+
+    let cardTips = 0;
+    let cashTips = 0;
+    let gratuities = 0;
+    if (job === 'job-server' || job === 'job-bartender') {
+      const shiftHours = (clockOut - clockIn) / 3_600_000;
+      const orderCount = Math.round(shiftHours * (job === 'job-server' ? 2.2 : 2.8) * (weekend ? 1.3 : 1));
+      for (let n = 0; n < orderCount; n += 1) {
+        const opened = clockIn + 15 * 60_000 + random() * Math.max(0, clockOut - clockIn - 90 * 60_000);
+        const paid = Math.min(clockOut - 5 * 60_000, opened + (25 + random() * 60) * 60_000);
+        const guests = job === 'job-server' ? 1 + Math.floor(random() * 4) : 1 + Math.floor(random() * 2);
+        const selections: ToastSelection[] = [];
+        const lines = guests + Math.floor(random() * (guests + 2));
+        for (let line = 0; line < lines; line += 1) {
+          const [displayName, price, category] =
+            job === 'job-bartender' && random() < 0.7 ? pick(MENU.filter(([, , cat]) => cat !== 'cat-food')) : pick(MENU);
+          const discounted = random() < 0.05;
+          selections.push({
+            displayName,
+            quantity: 1,
+            preDiscountPrice: price,
+            price: discounted ? money(price * 0.8) : price,
+            voided: random() < 0.02,
+            salesCategory: { guid: category },
+          });
+        }
+        const voided = random() < 0.01;
+        const net = money(selections.filter((s) => !s.voided).reduce((sum, s) => sum + (s.price ?? 0), 0));
+        const tax = money(net * 0.05);
+        const tip = money(net * (0.14 + random() * 0.1));
+        const cash = random() < 0.15;
+        const gratuity = guests >= 4 && job === 'job-server' && random() < 0.3 ? money(net * 0.18) : 0;
+        if (!voided) {
+          if (cash) cashTips += tip;
+          else cardTips += tip;
+          gratuities += gratuity;
+        }
+        orders.push({
+          guid: `ord-${businessDate}-${orders.length + 1}`,
+          businessDate: Number(businessDate),
+          openedDate: toastTime(opened),
+          voided,
+          numberOfGuests: guests,
+          server: { guid: employee },
+          revenueCenter: { guid: job === 'job-bartender' ? 'rc-bar' : 'rc-dining' },
+          checks: [
+            {
+              openedDate: toastTime(opened),
+              closedDate: toastTime(paid),
+              amount: net,
+              taxAmount: tax,
+              totalAmount: money(net + tax),
+              selections,
+              payments: [
+                {
+                  type: cash ? 'CASH' : 'CREDIT',
+                  amount: money(net + tax + gratuity),
+                  tipAmount: tip,
+                  paidDate: toastTime(paid),
+                  paymentStatus: 'CAPTURED',
+                },
+              ],
+              appliedServiceCharges: gratuity ? [{ name: 'Large party gratuity', chargeAmount: gratuity, gratuity: true }] : [],
+            },
+          ],
         });
       }
-      const net = money(selections.filter((s) => !s.voided).reduce((sum, s) => sum + (s.price ?? 0), 0));
-      const tax = money(net * 0.05);
-      const tip = money(net * (0.14 + random() * 0.1));
-      const cash = random() < 0.2;
-      if (cash) tally.cash += tip;
-      else tally.card += tip;
-      const gratuity = guests >= 4 && job === 'job-server' && random() < 0.3 ? money(net * 0.18) : 0;
-      orders.push({
-        guid: `ord-${businessDate}-${orderNumber}`,
-        businessDate: Number(businessDate),
-        voided: random() < 0.01,
-        numberOfGuests: guests,
-        server: { guid },
-        revenueCenter: { guid: job === 'job-bartender' ? 'rc-bar' : random() < 0.75 ? 'rc-dining' : 'rc-patio' },
-        checks: [
-          {
-            amount: net,
-            taxAmount: tax,
-            totalAmount: money(net + tax),
-            selections,
-            payments: [{ type: cash ? 'CASH' : 'CREDIT', amount: money(net + tax + gratuity), tipAmount: tip, paymentStatus: cash ? 'CAPTURED' : 'CAPTURED' }],
-            appliedServiceCharges: gratuity ? [{ name: 'Large party gratuity', chargeAmount: gratuity, gratuity: true }] : [],
-          },
-        ],
-      });
     }
-    tips.set(guid, tally);
-  }
 
-  const timeEntries: ToastTimeEntry[] = working.map(([guid, , , job, wage], index) => {
-    const hours = money((job === 'job-host' || job === 'job-busser' ? 5 : 6.5) + random() * 2.5);
-    const regularHours = Math.min(hours, 8);
-    const tally = tips.get(guid);
-    const startHour = job === 'job-cook' || job === 'job-dish' ? 15 : 16;
-    return {
+    timeEntries.push({
       guid: `te-${businessDate}-${index}`,
-      employeeReference: { guid },
+      employeeReference: { guid: employee },
       jobReference: { guid: job },
       businessDate,
-      inDate: `${businessDate.slice(0, 4)}-${businessDate.slice(4, 6)}-${businessDate.slice(6, 8)}T${startHour}:00:00.000+0000`,
-      outDate: `${businessDate.slice(0, 4)}-${businessDate.slice(4, 6)}-${businessDate.slice(6, 8)}T23:30:00.000+0000`,
+      inDate: toastTime(clockIn),
+      outDate: toastTime(clockOut),
+      breaks: breakStart
+        ? [{ guid: `br-${businessDate}-${index}`, paid: false, inDate: toastTime(breakStart), outDate: toastTime(breakStart + breakMs) }]
+        : [],
       regularHours,
       overtimeHours: money(hours - regularHours),
-      hourlyWage: wage,
-      nonCashTips: money(tally?.card ?? 0),
-      declaredCashTips: money(tally?.cash ?? 0),
+      hourlyWage: STAFF[employee]![3],
+      nonCashTips: money(cardTips),
+      declaredCashTips: money(cashTips),
       cashGratuityServiceCharges: 0,
-      nonCashGratuityServiceCharges: money(
-        orders
-          .filter((order) => !order.voided && order.server?.guid === guid)
-          .flatMap((order) => order.checks ?? [])
-          .flatMap((check) => check.appliedServiceCharges ?? [])
-          .reduce((sum, charge) => sum + (charge.chargeAmount ?? 0), 0),
-      ),
-    };
+      nonCashGratuityServiceCharges: money(gratuities),
+    });
   });
 
   return { timeEntries, orders };
@@ -187,14 +219,19 @@ export class DemoToastApi implements ToastDataApi {
   async getRestaurant() {
     return {
       guid: 'demo-restaurant',
-      general: { name: 'The Stolen Bell (demo data)', locationName: 'Demo', timeZone: 'America/Vancouver', currencyCode: 'CAD' },
+      general: { name: 'Stolen Bell (demo data)', locationName: 'Demo', timeZone: TIME_ZONE, currencyCode: 'CAD' },
     };
   }
   async listJobs() {
     return JOBS;
   }
   async listEmployees(): Promise<ToastEmployee[]> {
-    return STAFF.map(([guid, firstName, lastName, job]) => ({ guid, firstName, lastName, jobReferences: [{ guid: job }] }));
+    return Object.entries(STAFF).map(([guid, [firstName, lastName, jobs]]) => ({
+      guid,
+      firstName,
+      lastName,
+      jobReferences: jobs.map((job) => ({ guid: job })),
+    }));
   }
   async listTimeEntries(businessDate: string) {
     return buildDay(businessDate).timeEntries;

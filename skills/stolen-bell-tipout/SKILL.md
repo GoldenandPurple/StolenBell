@@ -44,26 +44,29 @@ A person who works both periods gets their Lunch and Dinner amounts summed.
 - Ask whether any **cash** is being added to either period's pool. Default: none.
 
 ### 2. Pull from Toast (read-only)
-> ⚠ The Toast MCP tool names below are placeholders until our own Toast MCP server
-> is live. Wire these to the real tool names once it exists; the shape of what's
-> needed does not change.
+Call the Toast MCP server's **`get_tipout_inputs`** tool with the business date
+(`date`, YYYY-MM-DD), plus `cashLunch` / `cashDinner` only if the GM gave a cash figure.
+It does the bucketing for you:
+- **Card tips** go to Lunch or Dinner by when each payment was made. Cash tips are left out
+  (they're reported under `details` and as a `check` issue so the GM can decide).
+- **Sales** go to the period the order was opened in. `gross_food_sales` is the
+  food-category items (pre-tax, after discounts); `net_sales` is all categories.
+- **Hours** come from clock-in/clock-out, split at the Lunch/Dinner boundary, with unpaid
+  breaks removed. Time before Lunch starts counts toward neither period. Toast jobs are
+  mapped to `Bartender`, `Server`, `Host`, `Barback` or `Kitchen` by `config/tipout.yaml`
+  in the MCP server repo.
 
-Pull for the business date and bucket everything into Lunch / Dinner:
-- **Card tips, timestamped** → each card tip falls into Lunch or Dinner by the time
-  it was taken. Sum per period = `pool_card_tips`.
-- **Sales by category, per period** → `gross_food_sales` (food-category items, pre-tax,
-  after comps/discounts) and `net_sales` (all categories, pre-tax, after discounts).
-- **Time entries (clock-in/clock-out) with job/role** → for each employee, compute hours
-  **split at 16:00** (a shift crossing the boundary contributes to both periods; time
-  before 11:00 counts toward neither). Map each person's Toast job to one of:
-  `Bartender`, `Server`, `Host`, `Barback`, `Kitchen`. Keep a note of any Toast job
-  title that doesn't map cleanly and surface it rather than guessing.
+Read the result:
+- **`ready: false`** means at least one issue has severity `stop` (open shift, a Toast job
+  with no role mapping, tips or orders without a time, sales with $0 card tips, no food
+  category found). **Stop.** Show the GM those issues and wait. Don't estimate around them.
+- Issues with severity `check` don't block. Show them to the GM alongside the result.
+- `details` shows card tips by payment type, cash tips seen in Toast, and sales by category
+  per period. Use it to answer "where did this number come from?"
 
-### 3. Assemble the input
-Build JSON in the exact shape of `examples/dinner_example.json`: a `periods` object
-with `Lunch` and/or `Dinner`, each carrying `pool_card_tips`, optional
-`cash_tips_manual`, `gross_food_sales`, `net_sales`, and a `staff` list of
-`{name, role, hours}`. Write it to the scratchpad.
+### 3. Save the input
+`input` is already in the exact shape of `examples/dinner_example.json`. Write it unchanged
+to the scratchpad (e.g. `tipout-YYYY-MM-DD.json`).
 
 ### 4. Run the engine
 ```

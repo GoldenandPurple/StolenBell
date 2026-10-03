@@ -50,7 +50,16 @@ export interface ToastTimeEntry {
   cashGratuityServiceCharges?: number;
   nonCashGratuityServiceCharges?: number;
   tipsWithheld?: number;
+  breaks?: ToastTimeEntryBreak[];
   deleted?: boolean;
+}
+
+export interface ToastTimeEntryBreak {
+  guid?: string;
+  paid?: boolean;
+  inDate?: string;
+  outDate?: string | null;
+  missed?: boolean;
 }
 
 export interface ToastSalesCategory {
@@ -76,6 +85,7 @@ export interface ToastPayment {
   type?: string; // CASH, CREDIT, GIFTCARD, ...
   amount?: number;
   tipAmount?: number;
+  paidDate?: string;
   refundStatus?: string;
   paymentStatus?: string;
   voidInfo?: unknown;
@@ -89,6 +99,8 @@ export interface ToastServiceCharge {
 
 export interface ToastCheck {
   guid?: string;
+  openedDate?: string;
+  closedDate?: string;
   amount?: number;
   taxAmount?: number;
   totalAmount?: number;
@@ -103,6 +115,7 @@ export interface ToastCheck {
 export interface ToastOrder {
   guid: string;
   businessDate?: number; // yyyyMMdd
+  openedDate?: string;
   voided?: boolean;
   deleted?: boolean;
   numberOfGuests?: number;
